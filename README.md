@@ -14,7 +14,7 @@ Everything is Terraform and AWS managed services: no servers, nothing running be
 
 ## Demo
 
-The address is the output `site_url` of the deployment of this repository.
+**<https://d7yfghm28t7n6.cloudfront.net>**
 
 Sign in with `demo@example.com` / `Demo-Password-1` (the fields are filled in for you).
 
