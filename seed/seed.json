@@ -177,5 +177,101 @@
       ] }
     ],
     "acknowledged": ["root_activity", "trail_tampering"]
+  },
+  "recommendations": {
+    "refreshed_days_ago": 1,
+    "rows": [
+      { "recommendation_id": "demo-ec2-build-runner", "action_type": "Rightsize", "current_resource_type": "Ec2Instance", "recommended_resource_type": "Ec2Instance", "current_resource_summary": "t4g.small", "recommended_resource_summary": "t4g.micro", "resource_arn": "arn:aws:ec2:eu-central-1:123456789012:instance/i-0a1b2c3d4e5f60718", "region": "eu-central-1", "estimated_monthly_cost_before_discount": "12.26", "estimated_monthly_savings_after_discount": "6.13", "estimated_savings_percentage_after_discount": "50", "currency_code": "USD", "implementation_effort": "VeryLow", "restart_needed": "true", "rollback_possible": "true", "recommendation_source": "ComputeOptimizer", "tags": "{\"Project\": \"build\"}" },
+      { "recommendation_id": "demo-savings-plan", "action_type": "PurchaseSavingsPlans", "current_resource_type": "ComputeSavingsPlans", "recommended_resource_type": "ComputeSavingsPlans", "current_resource_summary": "", "recommended_resource_summary": "Compute Savings Plan, 1 year, no upfront, $0.004/hour", "resource_arn": "", "region": "global", "estimated_monthly_cost_before_discount": "5.84", "estimated_monthly_savings_after_discount": "1.92", "estimated_savings_percentage_after_discount": "24", "currency_code": "USD", "implementation_effort": "VeryLow", "restart_needed": "false", "rollback_possible": "false", "recommendation_source": "CostExplorer", "tags": "" },
+      { "recommendation_id": "demo-ebs-unattached", "action_type": "Delete", "current_resource_type": "EbsVolume", "recommended_resource_type": "EbsVolume", "current_resource_summary": "gp3, 20 GiB, unattached for 41 days", "recommended_resource_summary": "", "resource_arn": "arn:aws:ec2:eu-central-1:123456789012:volume/vol-0f1e2d3c4b5a69788", "region": "eu-central-1", "estimated_monthly_cost_before_discount": "1.90", "estimated_monthly_savings_after_discount": "1.90", "estimated_savings_percentage_after_discount": "100", "currency_code": "USD", "implementation_effort": "Low", "restart_needed": "false", "rollback_possible": "false", "recommendation_source": "ComputeOptimizer", "tags": "{\"Project\": \"build\"}" },
+      { "recommendation_id": "demo-ebs-gp2", "action_type": "Upgrade", "current_resource_type": "EbsVolume", "recommended_resource_type": "EbsVolume", "current_resource_summary": "gp2, 30 GiB", "recommended_resource_summary": "gp3, 30 GiB, 3000 IOPS, 125 MiB/s", "resource_arn": "arn:aws:ec2:eu-central-1:123456789012:volume/vol-0123456789abcdef0", "region": "eu-central-1", "estimated_monthly_cost_before_discount": "3.57", "estimated_monthly_savings_after_discount": "0.71", "estimated_savings_percentage_after_discount": "20", "currency_code": "USD", "implementation_effort": "VeryLow", "restart_needed": "false", "rollback_possible": "true", "recommendation_source": "ComputeOptimizer", "tags": "{\"Project\": \"build\"}" },
+      { "recommendation_id": "demo-lambda-orders", "action_type": "Rightsize", "current_resource_type": "LambdaFunction", "recommended_resource_type": "LambdaFunction", "current_resource_summary": "1024 MB", "recommended_resource_summary": "512 MB", "resource_arn": "arn:aws:lambda:eu-central-1:123456789012:function:orders-api", "region": "eu-central-1", "estimated_monthly_cost_before_discount": "0.36", "estimated_monthly_savings_after_discount": "0.17", "estimated_savings_percentage_after_discount": "47", "currency_code": "USD", "implementation_effort": "VeryLow", "restart_needed": "false", "rollback_possible": "true", "recommendation_source": "ComputeOptimizer", "tags": "{\"Project\": \"orders\"}" }
+    ]
+  },
+  "insights": [
+    { "days_ago": 2, "time": "21:40", "type": "ApiCallRateInsight", "source": "ec2", "name": "RunInstances", "region": "eu-central-1", "baseline": 0.0021, "average": 0.35, "duration": 17, "who": "arn:aws:iam::123456789012:user/contractor" },
+    { "days_ago": 8, "time": "03:12", "type": "ApiErrorRateInsight", "source": "s3", "name": "GetObject", "error": "AccessDenied", "region": "eu-central-1", "baseline": 0.01, "average": 2.4, "duration": 9, "who": "arn:aws:iam::123456789012:role/orders-api" }
+  ],
+  "traffic": {
+    "days": 14,
+    "sources": [
+      {
+        "source": "cloudfront/website",
+        "daily": [900, 1500],
+        "weekend": 0.7,
+        "addresses": 60,
+        "paths": {
+          "/": 26,
+          "/index.html": 4,
+          "/app.js": 16,
+          "/styles.css": 16,
+          "/images/hero.webp": 12,
+          "/api/orders": 10,
+          "/favicon.ico": 6,
+          "/robots.txt": 2,
+          "/sitemap.xml": 2,
+          "/wp-login.php": 1,
+          "/.env": 1
+        },
+        "statuses": { "200": 86, "304": 8, "403": 1, "404": 4, "502": 1 },
+        "methods": { "GET": 90, "HEAD": 3, "POST": 5, "OPTIONS": 2 },
+        "results": { "Hit": 62, "RefreshHit": 6, "Miss": 28, "Error": 4 },
+        "countries": { "DE": 34, "US": 18, "FR": 9, "NL": 8, "GB": 7, "PL": 6, "IT": 5, "SG": 4, "IN": 4, "CN": 3, "BR": 2 },
+        "agents": {
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36": 34,
+          "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1": 22,
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15": 14,
+          "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0": 8,
+          "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)": 10,
+          "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)": 5,
+          "curl/8.11.1": 3,
+          "python-requests/2.32.5": 4
+        },
+        "referrers": {
+          "": 55,
+          "https://www.google.com/": 25,
+          "https://www.bing.com/": 5,
+          "https://duckduckgo.com/": 4,
+          "https://news.ycombinator.com/": 3,
+          "https://www.linkedin.com/": 3,
+          "https://github.com/": 5
+        },
+        "bytes": [300, 90000],
+        "ms": [1, 400]
+      },
+      {
+        "source": "cloudfront/orders-admin",
+        "daily": [120, 260],
+        "weekend": 0.2,
+        "addresses": 6,
+        "paths": { "/": 20, "/app.js": 15, "/styles.css": 15, "/api/orders": 30, "/api/orders/export": 5, "/api/me": 15 },
+        "statuses": { "200": 90, "304": 5, "401": 3, "500": 2 },
+        "methods": { "GET": 80, "POST": 12, "PATCH": 6, "OPTIONS": 2 },
+        "results": { "Hit": 30, "Miss": 66, "Error": 4 },
+        "countries": { "DE": 80, "NL": 15, "PL": 5 },
+        "agents": {
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15": 60,
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36": 40
+        },
+        "referrers": { "": 100 },
+        "bytes": [200, 40000],
+        "ms": [20, 900]
+      },
+      {
+        "source": "s3/orders-uploads-123456789012",
+        "daily": [150, 300],
+        "weekend": 0.5,
+        "addresses": 5,
+        "paths": { "uploads/2026/invoice-1042.pdf": 10, "uploads/2026/invoice-1043.pdf": 8, "uploads/2026/photo-77.jpg": 12, "exports/orders.csv": 6, "": 4 },
+        "statuses": { "200": 92, "204": 2, "403": 3, "404": 3 },
+        "methods": { "REST.GET.OBJECT": 55, "REST.PUT.OBJECT": 25, "REST.HEAD.OBJECT": 12, "REST.GET.BUCKET": 4, "REST.DELETE.OBJECT": 2, "REST.GET.ACL": 2 },
+        "requesters": { "role/orders-api/orders-api": 70, "role/Terraform/github-actions": 6, "anonymous": 4, "svc:lambda.amazonaws.com": 20 },
+        "errors": { "403": "AccessDenied", "404": "NoSuchKey" },
+        "agents": { "Boto3/1.40.70 md/Botocore#1.40.70 ua/2.1 os/linux lang/python#3.14": 80, "APN/1.0 HashiCorp/1.0 Terraform/1.16.3": 10, "aws-cli/2.31.0": 10 },
+        "referrers": { "": 100 },
+        "bytes": [0, 2000000],
+        "ms": [5, 250]
+      }
+    ]
   }
 }

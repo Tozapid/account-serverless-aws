@@ -40,7 +40,7 @@ data "aws_iam_policy_document" "lambda" {
     content {
       sid       = "ReadReports"
       actions   = ["s3:GetObject"]
-      resources = ["arn:aws:s3:::${statement.value}/${var.cur_prefix}/*"]
+      resources = [for prefix in compact([var.cur_prefix, var.coh_prefix]) : "arn:aws:s3:::${statement.value}/${prefix}/*"]
     }
   }
 
@@ -55,7 +55,7 @@ data "aws_iam_policy_document" "lambda" {
       condition {
         test     = "StringLike"
         variable = "s3:prefix"
-        values   = ["${var.cur_prefix}/*"]
+        values   = [for prefix in compact([var.cur_prefix, var.coh_prefix]) : "${prefix}/*"]
       }
     }
   }
@@ -67,6 +67,17 @@ data "aws_iam_policy_document" "lambda" {
       sid       = "ReadTrail"
       actions   = ["s3:GetObject"]
       resources = ["arn:aws:s3:::${statement.value}/*"]
+    }
+  }
+
+  # The access logs of the sites and the buckets (traffic.py).
+  dynamic "statement" {
+    for_each = local.traffic ? [var.logs_bucket] : []
+
+    content {
+      sid       = "ReadLogs"
+      actions   = ["s3:GetObject"]
+      resources = ["arn:aws:s3:::${statement.value}/cloudfront/*", "arn:aws:s3:::${statement.value}/s3/*"]
     }
   }
 

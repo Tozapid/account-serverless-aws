@@ -9,8 +9,17 @@
   const root = document.getElementById("root");
   const state = {
     me: null,
-    // overview, costs, trail or findings; the address keeps it (#costs/2026-10).
+    // overview, costs, trail, traffic or findings; the address keeps it
+    // (#costs/2026-10).
     view: "overview",
+    recommendations: null,
+    // The access logs: the sources (a distribution or a bucket), the one
+    // shown, its day, the totals of the 14 days to it and the lists of the day.
+    trafficSources: null,
+    trafficSource: "",
+    trafficDay: null,
+    trafficDays: {},
+    trafficCounts: null,
     overview: null,
     periods: [],
     period: null,
@@ -37,7 +46,7 @@
   // The language is the Cognito attribute "locale" of the user; the browser
   // keeps a copy so that the sign-in page speaks it too.
   const LANGUAGE_KEY = "aws-language";
-  const VIEWS = ["overview", "costs", "trail", "findings"];
+  const VIEWS = ["overview", "costs", "trail", "traffic", "findings"];
   let language = i18n.fallback;
   let pool = null;
   let toastTimer = null;
@@ -504,6 +513,7 @@
     state.view = VIEWS.includes(view) ? view : "overview";
     if (state.view === "costs" && /^\d{4}-\d{2}$/.test(arg || "")) state.period = arg;
     if (state.view === "trail") state.day = /^\d{4}-\d{2}-\d{2}$/.test(arg || "") ? arg : state.day || today();
+    if (state.view === "traffic") state.trafficDay = /^\d{4}-\d{2}-\d{2}$/.test(arg || "") ? arg : state.trafficDay || today();
   }
 
   function go(view, arg) {
@@ -519,6 +529,7 @@
       if (state.view === "overview") state.overview = await api("/overview");
       else if (state.view === "costs") await loadCosts();
       else if (state.view === "trail") await loadTrail();
+      else if (state.view === "traffic") await loadTraffic();
       else await loadFindings(true);
     } catch (error) {
       toast(error.message);
@@ -535,7 +546,7 @@
       "aria-current": view === state.view ? "page" : null,
       onclick: () => go(view),
     }, t("nav." + view))));
-    const body = state.view === "costs" ? costsView() : state.view === "trail" ? trailView()
+    const body = state.view === "costs" ? costsView() : state.view === "trail" ? trailView() : state.view === "traffic" ? trafficView()
       : state.view === "findings" ? findingsView() : overviewView();
     root.replaceChildren(el("div", { class: "app" }, [
       el("header", { class: "top" }, [
@@ -766,7 +777,33 @@
   async function loadCosts() {
     state.periods = (await api("/costs")).periods || [];
     if (!state.period) state.period = state.periods[state.periods.length - 1] || today().slice(0, 7);
-    state.month = await api("/costs/" + state.period);
+    const [month, recommendations] = await Promise.all([api("/costs/" + state.period), api("/recommendations")]);
+    state.month = month;
+    state.recommendations = recommendations;
+  }
+
+  // What Cost Optimization Hub would change, the biggest savings first.
+  function recommendationsPanel() {
+    const data = state.recommendations;
+    if (!data) return null;
+    const items = data.items || [];
+    const unit = data.currency || "USD";
+    const yes = (value) => t(value ? "recs.yes" : "recs.no");
+    return section(t("recs.title"), [
+      el("p", { class: "hint" }, data.updated ? t("recs.hint", { count: number(data.count), savings: money(data.savings, unit), date: when(data.updated) }) : t("recs.none")),
+      items.length ? el("div", { class: "table-wrap" }, el("table", { class: "data recs" }, [
+        el("thead", {}, el("tr", {}, [t("recs.action"), t("recs.resource"), t("recs.change"), t("recs.savings"), t("recs.effort"), t("recs.restart")].map((text) => el("th", {}, text)))),
+        el("tbody", {}, items.slice(0, 50).map((item) => el("tr", {}, [
+          el("td", {}, [t("recs.actionType." + item.action) === "recs.actionType." + item.action ? item.action : t("recs.actionType." + item.action),
+            el("div", { class: "muted small" }, item.type)]),
+          el("td", {}, [el("span", { class: "mono" }, item.resource || "—"), el("div", { class: "muted small" }, [item.region, item.project].filter(Boolean).join(" · "))]),
+          el("td", {}, [item.current || "—", " → ", item.recommended || "—"]),
+          el("td", { class: "amount" }, [money(item.savings, item.currency || unit), item.percent ? el("div", { class: "muted small" }, `${item.percent}%`) : null]),
+          el("td", {}, item.effort || "—"),
+          el("td", {}, yes(item.restart)),
+        ]))),
+      ])) : null,
+    ]);
   }
 
   function costsView() {
@@ -788,7 +825,7 @@
     }, t("costs.refresh")) : null;
     const head = el("div", { class: "toolbar" }, [picker, refresh, month && !month.empty ? el("span", { class: "muted small" }, t("costs.updated", { date: when(month.updated) })) : null]);
     if (!month || state.month.period !== state.period) return [head, loading()];
-    if (month.empty) return [head, el("p", { class: "muted panel" }, t("costs.noReport"))];
+    if (month.empty) return [head, el("p", { class: "muted panel" }, t("costs.noReport")), recommendationsPanel()];
     const unit = month.currency || "USD";
     const kinds = month.kinds || {};
     const credits = Number(kinds.Credit || 0) + Number(kinds.Refund || 0);
@@ -808,6 +845,7 @@
         section(t("costs.kinds"), shareTable(month.kinds, unit, (key) => t("kind." + key) === "kind." + key ? key : t("kind." + key))),
       ]),
       section(t("costs.usageTypes"), shareTable(month.usage, unit)),
+      recommendationsPanel(),
     ];
   }
 
@@ -1103,6 +1141,116 @@
     ]);
   }
 
+  // Traffic ----------------------------------------------------------------
+  // The access logs of the sites (CloudFront) and of the buckets read without
+  // it (S3), a source at a time: the day and the 14 days to it.
+
+  async function loadTraffic() {
+    state.trafficSources = (await api("/traffic")).sources || [];
+    if (!state.trafficSources.some((item) => item.source === state.trafficSource)) {
+      state.trafficSource = (state.trafficSources[0] || {}).source || "";
+    }
+    state.trafficCounts = null;
+    if (!state.trafficSource) return;
+    const source = encodeURIComponent(state.trafficSource);
+    const [days, day] = await Promise.all([
+      api(`/traffic/days?source=${source}&from=${addDays(state.trafficDay, -13)}&to=${state.trafficDay}`),
+      api(`/traffic/day?source=${source}&day=${state.trafficDay}`),
+    ]);
+    state.trafficDays = days.days || {};
+    state.trafficCounts = day.counts;
+  }
+
+  function sourceName(source) {
+    const [kind, name] = source.split(/\/(.*)/);
+    return t("traffic.kind." + kind, { name });
+  }
+
+  function bytes(value) {
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let amount = Number(value || 0);
+    let unit = 0;
+    while (amount >= 1024 && unit < units.length - 1) {
+      amount /= 1024;
+      unit += 1;
+    }
+    return `${new Intl.NumberFormat(language, { maximumFractionDigits: unit ? 1 : 0 }).format(amount)} ${units[unit]}`;
+  }
+
+  function trafficChart(first, last) {
+    const labels = [];
+    for (let day = first; day <= last; day = addDays(day, 1)) labels.push(day);
+    const days = state.trafficDays;
+    return charts.columns({
+      labels,
+      series: [{ key: "ok", label: t("traffic.ok") }, { key: "s4xx", label: t("traffic.client") }, { key: "s5xx", label: t("traffic.server") }],
+      value: (day, key) => {
+        const item = days[day];
+        if (!item) return 0;
+        if (key === "ok") return Math.max(0, Number(item.requests) - Number(item.s4xx) - Number(item.s5xx));
+        return Number(item[key] || 0);
+      },
+      format: (amount) => number(Math.round(amount)),
+      tick: (day) => dayName(day, "short"),
+      title: (day) => dayName(day),
+      extra: (day) => (days[day] ? t("traffic.dataSent", { data: bytes(days[day].bytes) }) : t("traffic.noDay")),
+      totalLabel: t("chart.total"),
+      label: t("traffic.chart"),
+      height: 160,
+      key: "traffic",
+      legendTitle: t("chart.legendHint"),
+    });
+  }
+
+  function trafficView() {
+    const day = state.trafficDay;
+    const sources = state.trafficSources;
+    if (sources === null) return [loading()];
+    if (!sources.length) return [el("p", { class: "muted panel" }, t("traffic.none"))];
+    const s3 = state.trafficSource.startsWith("s3/");
+    const head = el("div", { class: "toolbar" }, [
+      el("select", {
+        "aria-label": t("traffic.source"),
+        onchange: (event) => {
+          state.trafficSource = event.target.value;
+          show();
+        },
+      }, sources.map((item) => el("option", { value: item.source, selected: item.source === state.trafficSource }, sourceName(item.source)))),
+      el("button", { type: "button", class: "ghost", "aria-label": t("trail.previous"), onclick: () => go("traffic", addDays(day, -1)) }, "←"),
+      el("input", { type: "date", value: day, max: today(), "aria-label": t("trail.day"), onchange: (event) => event.target.value && go("traffic", event.target.value) }),
+      el("button", { type: "button", class: "ghost", "aria-label": t("trail.next"), disabled: day >= today(), onclick: () => go("traffic", addDays(day, 1)) }, "→"),
+      el("span", { class: "muted small" }, t("trail.utc")),
+    ]);
+    const counts = state.trafficCounts;
+    const value = (key, format) => (counts ? (format || number)(counts[key]) : "—");
+    const requests = counts ? Number(counts.requests) : 0;
+    const list = (title, key, nameOf) => section(title, shareTable(counts && counts[key], null, nameOf, 10));
+    return [
+      head,
+      el("p", { class: "hint" }, t(s3 ? "traffic.hintS3" : "traffic.hintCloudFront")),
+      el("div", { class: "tiles" }, [
+        tile(t("traffic.requests"), value("requests")),
+        tile(t("traffic.data"), value("bytes", bytes)),
+        tile(t("traffic.client"), value("s4xx"), null, counts && counts.s4xx ? "warn" : ""),
+        tile(t("traffic.server"), value("s5xx"), null, counts && counts.s5xx ? "warn" : ""),
+        s3 ? tile(t("traffic.avgTime"), requests ? `${number(Math.round(counts.time_ms / requests))} ms` : "—")
+          : tile(t("traffic.hitRate"), requests ? `${Math.round((counts.hits / requests) * 100)}%` : "—"),
+      ]),
+      section(t("traffic.chart"), trafficChart(addDays(day, -13), day)),
+      counts ? el("div", { class: "columns" }, [
+        list(t(s3 ? "traffic.keys" : "traffic.paths"), "paths"),
+        list(t("traffic.statuses"), "statuses"),
+        list(t(s3 ? "traffic.operations" : "traffic.methods"), "methods"),
+        s3 ? list(t("traffic.requesters"), "requesters") : list(t("traffic.results"), "results", (key) => t("traffic.result." + key) === "traffic.result." + key ? key : t("traffic.result." + key)),
+        s3 ? list(t("traffic.errors"), "errors") : list(t("traffic.countries"), "countries"),
+        list(t("traffic.ips"), "ips"),
+        list(t("traffic.agents"), "agents"),
+        list(t("traffic.referrers"), "referrers"),
+        list(t("traffic.hours"), "hours", (key) => `${key}:00`),
+      ]) : el("p", { class: "muted panel" }, t("traffic.noDay")),
+    ];
+  }
+
   // Findings --------------------------------------------------------------
 
   async function loadFindings(fresh) {
@@ -1123,6 +1271,14 @@
     if (item.rule === "cost_spike") return t("finding.spike", { day: dayName(details.day), amount: money(details.amount), median: money(details.median) });
     if (item.rule === "new_service") return t("finding.service", { service: serviceName(details.service), amount: money(details.amount) });
     if (item.rule === "access_denied") return t("finding.denied", { principal: item.principal, day: dayName(item.day), count: details.threshold });
+    if (item.rule === "insight") {
+      return t("finding.insight", { api: `${item.event_source}:${item.event_name}`, type: t("insightType." + details.type),
+        average: number(Math.round(Number(details.average || 0) * 100) / 100), baseline: number(Math.round(Number(details.baseline || 0) * 100) / 100) });
+    }
+    if (item.rule === "savings") {
+      return t("finding.savings", { change: [details.current, details.recommended].filter(Boolean).join(" → "), resource: details.resource || details.type,
+        amount: money(details.savings, details.currency || "USD") });
+    }
     return [item.event_name, item.principal, item.ip, item.region].filter(Boolean).join(" · ");
   }
 

@@ -106,6 +106,30 @@ variable "cur_prefix" {
   description = "Prefix of the Data Export in reports_bucket: <S3 prefix>/<export name>, with data/ and metadata/ under it."
 }
 
+variable "coh_prefix" {
+  type        = string
+  default     = "coh/cost-optimization"
+  description = "Prefix of the Data Export of the recommendations of Cost Optimization Hub in reports_bucket: data/ and metadata/ are under it. Empty: no recommendations are read."
+}
+
+variable "savings_min_usd" {
+  type        = number
+  default     = 1
+  description = "A recommendation that saves at least this many dollars a month is a finding the first time it is seen."
+}
+
+variable "logs_bucket" {
+  type        = string
+  default     = ""
+  description = "Bucket of the access logs to show under Traffic: standard logs (v2) of CloudFront under cloudfront/<site>/ and S3 server access logs under s3/, with EventBridge notifications on. Empty: no traffic is read (the demo)."
+}
+
+variable "access_logs_bucket" {
+  type        = string
+  default     = ""
+  description = "Bucket that the standard logs (v2) of this site's distribution go to, under cloudfront/<name>/, such as the logs_bucket of an overview; its policy has to let delivery.logs.amazonaws.com write there. Empty: no access logs."
+}
+
 variable "trail_bucket" {
   type        = string
   default     = ""

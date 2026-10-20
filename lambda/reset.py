@@ -13,13 +13,20 @@ the code that reads a real account:
   go, so the counters, the events, the combinations and the findings are
   the real ones. The principals are learned first; the incidents of the last
   days are news;
+- the Insights of CloudTrail of past days, through trail.insights();
+- the recommendations of Cost Optimization Hub, rows of the export through
+  recommendations.recommendation() and recommendations.save();
+- the access logs of two sites and a bucket: requests of the days of the
+  seed, counted by traffic.count() and saved by traffic.save() as log files
+  would be;
 - the findings the seed calls acknowledged are acknowledged by the demo
   user.
 
 A day of the demo is made once (pk = SEED, sk = STATE): the first reset of a
 UTC day, or one after a deploy, wipes the table and makes it all again,
 dated back from today. Every other reset is light, so that the demo costs
-cents: it adds the records of the time passed since the last one, puts back
+cents: it adds the records and the requests of the time passed since the
+last one, puts back
 what a visitor may change (the rules, the mails a user wants, the
 acknowledged findings) and the users: the demo user gets the published
 password back, two-factor authentication off, the default language, the
@@ -37,6 +44,8 @@ from pathlib import Path
 import combos
 import common
 import costs
+import recommendations
+import traffic
 import trail
 
 logger = logging.getLogger()
@@ -58,8 +67,13 @@ def handler(event, context):
         result = {"full": True, "removed": wipe_table()}
         result.update(write_costs(seed, now))
         result["records"] = write_trail(seed, now)
+        result["insights"] = write_insights(seed, now)
+        result["recommendations"] = write_recommendations(seed, now)
+        result["requests"] = write_traffic(seed, now)
     else:
-        result = {"full": False, "records": add_records(seed, datetime.fromisoformat(state["until"].replace("Z", "+00:00")), now)}
+        since = datetime.fromisoformat(state["until"].replace("Z", "+00:00"))
+        result = {"full": False, "records": add_records(seed, since, now),
+                  "requests": add_requests(seed, since, now, "seed-" + common.iso(now))}
     common.table().put_item(Item={"pk": "SEED", "sk": "STATE", "day": now.date().isoformat(), "until": common.iso(now)})
     result["restored"] = restore(seed, owner)
     reset_users(owner)
@@ -321,6 +335,119 @@ def acknowledge(spec):
         if item["rule"] in rules and not item.get("ack"):
             item.update(ack=True, ack_by=owner, ack_at=item["time"])
             common.table().put_item(Item=item)
+
+
+def write_insights(seed, now):
+    """The Insights of the seed, a start and an end each, as the trail writes
+    them under CloudTrail-Insight/."""
+    records = []
+    for spec in seed.get("insights", []):
+        day = now.date() - timedelta(days=spec["days_ago"])
+        hour, minute = (int(part) for part in spec["time"].split(":"))
+        start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=timezone.utc)
+        shared = hashlib.md5(f"insight:{day}:{spec['source']}:{spec['name']}".encode()).hexdigest()
+        context = {
+            "statistics": {"baseline": {"average": spec["baseline"]}, "insight": {"average": spec["average"]},
+                           "insightDuration": spec["duration"]},
+            "attributions": [{"attribute": "userIdentityArn", "insight": [{"value": spec["who"], "average": spec["average"]}],
+                              "baseline": [{"value": spec["who"], "average": spec["baseline"]}]}],
+        }
+        for state, moment in (("Start", start), ("End", start + timedelta(minutes=spec["duration"]))):
+            if moment > now:
+                continue
+            details = {"state": state, "eventSource": f"{spec['source']}.amazonaws.com", "eventName": spec["name"],
+                       "insightType": spec["type"], "insightContext": context}
+            if spec.get("error"):
+                details["errorCode"] = spec["error"]
+            records.append({"eventVersion": "1.08", "eventTime": common.iso(moment), "awsRegion": spec["region"],
+                            "eventID": hashlib.md5(f"{shared}:{state}".encode()).hexdigest(), "eventType": "AwsCloudTrailInsight",
+                            "eventCategory": "Insight", "recipientAccountId": seed["account"], "sharedEventID": shared,
+                            "insightDetails": details})
+    return trail.insights(records)["insights"]
+
+
+# Recommendations -----------------------------------------------------------------------
+
+def write_recommendations(seed, now):
+    """The export of the recommendations, refreshed refreshed_days_ago."""
+    spec = seed.get("recommendations")
+    if not spec:
+        return 0
+    refreshed = common.iso(now - timedelta(days=int(spec.get("refreshed_days_ago", 1))))
+    rows = [{**row, "last_refresh_timestamp": refreshed} for row in spec["rows"]]
+    return recommendations.save([recommendations.recommendation(row) for row in rows], refreshed)["recommendations"]
+
+
+# Traffic -------------------------------------------------------------------------------
+
+def weighted(rng, choices):
+    return rng.choices(list(choices), weights=list(choices.values()))[0] if choices else ""
+
+
+def day_requests(spec, day):
+    """The requests of a source on a day, with their time, the same each time
+    they are made: more by day than by night, fewer at weekends."""
+    rng = random.Random(f"traffic:{spec['source']}:{day}")
+    low, high = spec["daily"]
+    total = rng.randint(low, high)
+    if day.weekday() >= 5:
+        total = int(total * spec.get("weekend", 1))
+    # A few busy addresses and a long tail, from the ranges for documentation.
+    addresses = [f"{rng.choice(('192.0.2', '198.51.100', '203.0.113'))}.{rng.randint(1, 254)}" for _ in range(spec.get("addresses", 20))]
+    address_weights = [1 / (rank + 1) for rank in range(len(addresses))]
+    s3 = spec["source"].startswith("s3/")
+    found = []
+    for _ in range(total):
+        moment = datetime(day.year, day.month, day.day, tzinfo=timezone.utc) + timedelta(
+            seconds=int(rng.triangular(0, 86399, 14 * 3600)))
+        status = int(weighted(rng, spec["statuses"]))
+        low_bytes, high_bytes = spec["bytes"]
+        low_ms, high_ms = spec["ms"]
+        request = {
+            "day": day.isoformat(), "hour": f"{moment.hour:02d}", "ip": rng.choices(addresses, weights=address_weights)[0],
+            "method": weighted(rng, spec["methods"]), "path": weighted(rng, spec["paths"]), "status": status,
+            "bytes": 0 if status >= 300 else int(rng.uniform(low_bytes, high_bytes)), "time_ms": int(rng.uniform(low_ms, high_ms)),
+            "referrer": weighted(rng, spec.get("referrers", {})), "agent": weighted(rng, spec.get("agents", {})),
+        }
+        if s3:
+            request.update(requester=weighted(rng, spec.get("requesters", {})), error=spec.get("errors", {}).get(str(status), ""))
+        else:
+            result = "Error" if status >= 400 else weighted(rng, {name: share for name, share in spec["results"].items() if name != "Error"})
+            request.update(country=weighted(rng, spec.get("countries", {})), result=result)
+        found.append((moment, request))
+    return found
+
+
+def add_requests(seed, since, now, file_id):
+    """The requests of each source after since, up to now, as a log file per
+    source and day."""
+    total = 0
+    for spec in (seed.get("traffic") or {}).get("sources", []):
+        day = since.date()
+        while day <= now.date():
+            counts, found = traffic.empty(), 0
+            for moment, request in day_requests(spec, day):
+                if since < moment <= now:
+                    traffic.count(counts, request)
+                    found += 1
+            if found:
+                traffic.save(spec["source"], {day.isoformat(): counts}, f"{file_id}-{day}")
+                total += found
+            day += timedelta(days=1)
+    return total
+
+
+def write_traffic(seed, now):
+    """The days of the seed up to now; those before today are folded, as the
+    daily job would."""
+    spec = seed.get("traffic") or {}
+    days = int(spec.get("days", 14))
+    first = now.date() - timedelta(days=days - 1)
+    total = add_requests(seed, datetime(first.year, first.month, first.day, tzinfo=timezone.utc) - timedelta(seconds=1), now, "seed")
+    for source in spec.get("sources", []):
+        for back in range(1, days):
+            traffic.compact(source["source"], (now.date() - timedelta(days=back)).isoformat())
+    return total
 
 
 # What visitors change ------------------------------------------------------------------

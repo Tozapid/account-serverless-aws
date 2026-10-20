@@ -18,15 +18,18 @@ Everything is Terraform and AWS managed services: no servers, nothing running be
 
 Sign in with `demo@example.com` / `Demo-Password-1` (the fields are filled in for you).
 
-The demo shows a **made-up account**, `123456789012`, and reads nothing of the AWS account it runs in: three months of costs of a small web shop (a website, an orders API, a build server, a little AI assistant new this month) with a spike two days ago and two budgets, and thirty days of CloudTrail — Terraform from GitHub Actions, two people signing in through IAM Identity Center, a CI user, a Lambda function and AWS services — with the incidents of [`seed/seed.json`](seed/seed.json): the root user signing in, CloudTrail stopped for a few minutes, a contractor's user made, a security group opened on port 22, failed sign-ins and a sign-in without MFA from a new address, an instance in an unexpected region, a bucket made public, a burst of denied calls. The costs, the counters, the events and the findings are made by the same code that reads a real account: the reset writes lines of a cost report and CloudTrail records and hands them to it.
+The demo shows a **made-up account**, `123456789012`, and reads nothing of the AWS account it runs in: three months of costs of a small web shop (a website, an orders API, a build server, a little AI assistant new this month) with a spike two days ago and two budgets, and thirty days of CloudTrail — Terraform from GitHub Actions, two people signing in through IAM Identity Center, a CI user, a Lambda function and AWS services — with the incidents of [`seed/seed.json`](seed/seed.json): the root user signing in, CloudTrail stopped for a few minutes, a contractor's user made, a security group opened on port 22, failed sign-ins and a sign-in without MFA from a new address, an instance in an unexpected region, a bucket made public, a burst of denied calls, and two CloudTrail Insights; five recommendations of Cost Optimization Hub; and fourteen days of traffic of two sites and an S3 bucket. The costs, the counters, the events and the findings are made by the same code that reads a real account: the reset writes lines of a cost report and CloudTrail records, rows of the export of the recommendations and requests of the access logs, and hands them to it.
 
-Everything a visitor may do works: the filters, the charts, the events and their requests, the findings, acknowledging them, the rules in the settings, the language and the mails a user wants. The demo user is an administrator, so the users are there to look at; changing them is not, and "Refresh" and "Load from S3" are off, as there is no account to read. The account is made again at the first reset of every day (UTC), dated back from that day; every hour the reset adds the CloudTrail records of the hour, so the day goes on, puts back the rules, the mails and the acknowledged findings, and deletes any other user. Changing the password and two-factor authentication are hidden in the demo, so no visitor can lock the others out.
+Everything a visitor may do works: the filters, the charts, the events and their requests, the findings, acknowledging them, the rules in the settings, the language and the mails a user wants. The demo user is an administrator, so the users are there to look at; changing them is not, and "Refresh" and "Load from S3" are off, as there is no account to read. The account is made again at the first reset of every day (UTC), dated back from that day; every hour the reset adds the CloudTrail records and the requests of the hour, so the day goes on, puts back the rules, the mails and the acknowledged findings, and deletes any other user. Changing the password and two-factor authentication are hidden in the demo, so no visitor can lock the others out.
 
 ## Features
 
 - **Costs** from the Cost and Usage Report 2.0 (a Data Export to S3), read when its manifest arrives, a few times a day: the month by day with a chart split by service, by service, project (the value of a cost allocation tag), region, line type (usage, tax, credits) and usage type, the forecast of the month, the months before.
 - **Budgets** from the Budgets API, once a day: actual, forecast and limit.
 - **CloudTrail**: every log file read when it arrives — counters of each day (calls, changes, errors, sign-ins; the busiest principals, services, regions, error codes and changes), the events worth showing (changes, errors, sign-ins, the root user, whatever a rule found) with their request for `event_days` (90), and the calls by combination of principal, service, event, region, error and address, which the filters count on.
+- **CloudTrail Insights**: an unusual rate of write calls or of API errors found by the trail is a finding, with the baseline, the rate seen, the duration and who made the most calls.
+- **Recommendations** of Cost Optimization Hub, from its Data Export: a table under Costs with the monthly savings, the effort, a restart and the project; one that saves at least `savings_min_usd` (1) a month is a finding.
+- **Traffic**: the access logs of the sites and buckets of the account from one bucket (`logs_bucket`) — CloudFront standard logs (v2) and S3 server access logs: per source and day the requests, data sent, errors, cache hits and average time, the busiest paths or keys, addresses, countries, clients, referrers, methods or operations, requesters and error codes, and a chart of 14 days.
 - **Filters** of a day: a text, only changes, only errors, and values clicked in the lists of the day or in the table of events, all at once; the tiles, lists and the chart of the days show what the filter keeps, reads included.
 - **Findings** of 20 rules, critical or warning; administrators turn rules off, set the regions where changes are expected and the principals no rule looks at (patterns such as `role/Terraform/*`), and acknowledge findings.
 - **Mails** through SES: critical findings at once (the same rule and principal at most once an hour), a daily digest of the costs, budgets, the day of CloudTrail and the findings; each user picks theirs, in the language of their page.
@@ -46,8 +49,10 @@ flowchart LR
   B -->|sign in| COG[Cognito]
   EXP[Data Export CUR 2.0] --> REP[(S3: reports)]
   CT[CloudTrail trail] --> LOGS[(S3: logs)]
+  ACC[CloudFront, S3 access logs] --> ALOGS[(S3: access logs)]
   REP -->|manifest| EB[EventBridge]
   LOGS -->|log file| EB
+  ALOGS -->|log file| EB
   EB --> L
   EB2[EventBridge, daily] --> L
   L <--> DB[(DynamoDB)]
@@ -63,7 +68,9 @@ flowchart LR
 | API | API Gateway HTTP API with a Cognito JWT authorizer, Lambda `lambda/app.py` (Python, arm64) |
 | Costs | the Cost and Usage Report 2.0 of the account in S3 (`reports_bucket`), CSV gzipped |
 | Budgets | Budgets API (`DescribeBudgets`, free), once a day |
-| CloudTrail | the trail's bucket of the account (`trail_bucket`) |
+| CloudTrail | the trail's bucket of the account (`trail_bucket`), with its Insights |
+| Recommendations | the Data Export of Cost Optimization Hub in `reports_bucket` (`coh_prefix`) |
+| Traffic | the access logs bucket (`logs_bucket`) |
 | Data of the page | DynamoDB on demand, one table |
 | Mails | SES from `sender_address` (production) |
 | Demo | Lambda `lambda/reset.py`, EventBridge `rate(1 hour)` |
@@ -79,6 +86,10 @@ The Data Export writes the report of a month under `<prefix>/data/BILLING_PERIOD
 Every new log file (`*/CloudTrail/*.json.gz`; the digests do not match) goes to the function. Files of one day arrive side by side, so the counters of a day are written on condition that nobody wrote them in between, and read again if somebody did. The events of a day keep what is worth showing; a read that worked is only counted. A principal that changed something, or a sign-in address of a principal, seen for the first time is a finding — after a week of learning, so that the first days do not flood the digest.
 
 Each log file also writes a small item of the combinations of its calls (`pk = COMBOS#<day>`), which the daily job folds into one item a day; the filters count on them, so a filter of 14 days reads 14 items. A read has no event name in its combination: there are too many of them.
+
+### Insights, recommendations and traffic
+
+CloudTrail Insights writes under `CloudTrail-Insight/` of the trail's bucket; the start of an insight is a finding. The Data Export of the recommendations writes like the cost report, under `coh_prefix`; its manifest makes the function replace the recommendations (`pk = RECOMMENDATIONS`) and find those worth `savings_min_usd` a month, once each. An access log in `logs_bucket` — `cloudfront/<site>/…` or `s3/<account>/<region>/<bucket>/…` — writes the counts of its requests by day in a small item of its own (`pk = TRAFFIC#<source>#<day>`), which the daily job folds into one item a day, as for the filters of CloudTrail.
 
 ### Load from S3
 
@@ -103,7 +114,10 @@ The defaults deploy the **test environment**, the public demo above:
 | `demo` | `true` | `false` |
 | `domain_name`, `route53_zone_name` | `""` — the CloudFront address | `aws.example.com`, `example.com` |
 | `reports_bucket`, `cur_prefix` | `""` — no costs | the bucket and `<S3 prefix>/<export name>` of the Data Export |
+| `coh_prefix` | `coh/cost-optimization` — read only with `reports_bucket` | `<S3 prefix>/<export name>` of the Data Export of the recommendations, or `""` |
 | `trail_bucket` | `""` — no CloudTrail | the bucket of the trail |
+| `logs_bucket` | `""` — no traffic | the bucket of the access logs |
+| `access_logs_bucket` | `""` — no access logs of the page | the same bucket, to see the page's own traffic |
 | `sender_address` | `""` — no SES, no mails | `alert@aws.example.com` |
 | `admin_email` | `demo@example.com` | your address |
 | `admin_password` | `Demo-Password-1` | `""` — Cognito mails a temporary password |
@@ -113,7 +127,8 @@ What the account needs, made outside this stack (they belong to the account, not
 
 1. **A Data Export** of the type "Standard data export", table `COST_AND_USAGE_REPORT` (CUR 2.0), daily, CSV gzipped, overwriting, to an S3 bucket in the region of the stack; `cur_prefix` is its S3 prefix and its name. The bucket policy has to let `bcm-data-exports.amazonaws.com` and `billingreports.amazonaws.com` write. A cost allocation tag (`cost_tag`, `Project`) splits the costs by project once it is activated in Billing.
 2. **A trail** of the management events of all regions to an S3 bucket in the region of the stack, without a key prefix (the load reads `AWSLogs/<account>/CloudTrail/…`); `trail_kms_key_arn` if it is encrypted with KMS.
-3. **EventBridge notifications** on both buckets (`aws_s3_bucket_notification` with `eventbridge = true`, or Properties → Amazon EventBridge in the console): the new manifests and log files reach the function through them.
+3. Optional: **Cost Optimization Hub** with Compute Optimizer enrolled, and a Data Export of the table `COST_OPTIMIZATION_RECOMMENDATIONS` to the same bucket (it needs the service-linked role `AWSServiceRoleForBCMDataExports`; the first export may fail for up to a day after the enrollment). **Insights** on the trail (`ApiCallRateInsight`, `ApiErrorRateInsight`), charged per event analysed. A bucket of **access logs** for `logs_bucket`, whose policy lets `delivery.logs.amazonaws.com` write under `cloudfront/` and `logging.s3.amazonaws.com` under `s3/`; each site turns on its CloudFront standard logs (v2) into it, and each bucket read without CloudFront its server access logs.
+4. **EventBridge notifications** on the buckets (`aws_s3_bucket_notification` with `eventbridge = true`, or Properties → Amazon EventBridge in the console): the new manifests and log files reach the function through them.
 
 Steps to production:
 
@@ -138,7 +153,7 @@ Optional, with a domain. IAM Identity Center makes SAML applications in the cons
 
 1. An S3 bucket for Terraform state (the S3 backend with the native lockfile, Terraform 1.10+).
 2. The GitHub OIDC provider in the AWS account and a role for this repository that trusts only jobs of the GitHub environment `demo`. Its permissions: everything named with the `name` prefix (`s3:*` on `arn:aws:s3:::account-serverless-*`, the table, functions, roles with `iam:PassRole`, log groups, SSM parameters, EventBridge rules), API Gateway, Cognito and CloudFront (their ids are generated), log delivery for API access logs, and the state objects under the state key prefix. The demo needs no SES, ACM, Route 53, Budgets or access to the buckets of the account; production adds them.
-3. In the GitHub repository: the environment `demo`, and the variables `AWS_ROLE_ARN` (the role) and `TF_STATE_BUCKET` (the state bucket). There are no secrets.
+3. In the GitHub repository: the environment `demo`, and the variables `AWS_ROLE_ARN` (the role) and `TF_STATE_BUCKET` (the state bucket). There are no secrets. Optionally `ACCESS_LOGS_BUCKET`: the CI passes it as `access_logs_bucket`, and the CloudFront access logs of the site go there (see [Access logs](#access-logs)); the role then also needs log delivery in `us-east-1` (`logs:PutDeliverySource`, `PutDeliveryDestination`, `CreateDelivery` and their `Get`/`Delete`/`Describe` on names with the prefix) and `s3:GetBucketPolicy` on that bucket.
 
 ### GitHub Actions
 
@@ -180,11 +195,19 @@ The page and the API are one: `/api/*` with the Cognito token of the user.
 | `GET /api/trail/events?day=&cursor=&errors=1&writes=1&q=&principal=&source=&name=&region=&ip=&error=` | The events of a day, filtered |
 | `GET /api/trail/summary?from=&to=&day=` with the same filter | What the filter keeps, by day, and the lists of a day |
 | `GET /api/trail/events/<day>/<id>` | One event with its request |
+| `GET /api/recommendations` | The recommendations of Cost Optimization Hub |
+| `GET /api/traffic`, `GET /api/traffic/days?source=&from=&to=`, `GET /api/traffic/day?source=&day=` | The sources of the access logs; the totals of up to 92 days; the lists of a day |
 | `GET /api/findings?cursor=&severity=`, `PATCH /api/findings` | The findings; acknowledge one (administrators) |
 | `GET /api/rules`, `PUT /api/admin/settings` | The rules; their settings (administrators) |
 | `POST /api/admin/refresh` | Read the latest reports and the budgets again |
 | `GET`, `POST`, `DELETE /api/admin/backfill` | Load from S3 |
 | `GET`, `POST`, `PUT`, `DELETE /api/admin/users` | The users |
+
+## Access logs
+
+Off by default. With `access_logs_bucket` set (the repository variable `ACCESS_LOGS_BUCKET` in CI), `access-logs.tf` turns on the standard logs (v2) of CloudFront: CloudWatch delivers a gzipped JSON line per request from `us-east-1` to `cloudfront/<name>/<yyyy>/<MM>/<dd>/` of that bucket, at no charge for the delivery to S3. A line holds the date and time, the address and country of the viewer, the method, path, status, bytes, time taken, referrer, user agent, cache result and host.
+
+The bucket is yours, in the same account: its policy has to let `delivery.logs.amazonaws.com` put objects under `cloudfront/` (and read the bucket ACL), conditioned on the account. [account-serverless-aws](https://github.com/Tozapid/account-serverless-aws) reads such a bucket and shows the traffic of each site (its own `logs_bucket`).
 
 ## Access and security
 
@@ -209,7 +232,9 @@ The tests use no network: DynamoDB, S3, SES, Cognito, Budgets, Lambda, Identity 
 | --- | --- | --- |
 | Lambda, EventBridge, API Gateway, Cognito, CloudFront | free allowances | free allowances |
 | DynamoDB on demand, S3, CloudWatch Logs | a few cents | a few cents |
-| Budgets API, Data Export | — | free |
+| Budgets API, Data Exports, Cost Optimization Hub | — | free |
+| CloudFront standard logs (v2) to S3 | free | free delivery |
+| CloudTrail Insights | — | $0.35 per 100,000 events analysed, a few cents |
 | SES | — | $0.10 per 1,000 messages |
 | **Total** | **cents a month** | **under $1 a month** |
 

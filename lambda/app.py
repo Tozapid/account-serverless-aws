@@ -2,8 +2,11 @@
 
 One function does all of it:
 
-- EventBridge passes on a new manifest of the Cost and Usage Report from the
-  reports bucket (costs.py) and every new log file of CloudTrail (trail.py);
+- EventBridge passes on a new manifest of the Cost and Usage Report or of
+  the recommendations of Cost Optimization Hub from the reports bucket
+  (costs.py, recommendations.py), every new log file of CloudTrail and of
+  its Insights (trail.py), and every access log of the sites and the
+  buckets (traffic.py);
 - the daily job ({"action": "daily"}) reads the budgets, looks for cost
   spikes and new services, and mails the digest of the day before (mail.py);
 - "Refresh" on the page ({"action": "refresh"}) reads the latest reports and
@@ -20,7 +23,9 @@ months) and /costs/<YYYY-MM>; /budgets; /trail/days?from=&to= (counters),
 /trail/events?day=&cursor=&errors=1&writes=1&q= and any of
 principal, source, name, region, ip, error, /trail/summary?from=&to=&day= with
 the same filter, and /trail/events/<day>/<sk>;
-/findings?cursor=&severity=; /rules; /version. Administrators, the members
+/findings?cursor=&severity=; /recommendations; /traffic (the sources),
+/traffic/days?source=&from=&to=, /traffic/day?source=&day=; /rules;
+/version. Administrators, the members
 of the Cognito group ADMIN_GROUP, also acknowledge findings
 (PATCH /findings), set the rules (/admin/settings), start "Refresh"
 (POST /admin/refresh), load a period from S3 again (/admin/backfill,
@@ -43,8 +48,10 @@ import combos
 import common
 import costs
 import mail
+import recommendations
 import rules
 import sso
+import traffic
 import trail
 
 EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
@@ -84,7 +91,8 @@ ERRORS = {
     "user_not_found": "No such user",
     "not_yourself": "You cannot do this to your own account",
     "sso_user": "IAM Identity Center manages this user: its password, two-factor sign-in and administrator role",
-    "bad_backfill_range": "Days up to yesterday, the first before the last, at most 1100 of them",
+    "bad_source": "Unknown source of the access logs",
+    "bad_backfill_range": "Days up to yesterday, the first before the last, at most 1830 of them",
     "bad_keep": "Keep for 1 to 3650 days",
     "bad_backfill_kinds": "Pick the CloudTrail logs, the costs or both",
     "backfill_running": "Another load is running",
@@ -119,9 +127,14 @@ def handler(event, context):
         bucket = (detail.get("bucket") or {}).get("name", "")
         key = unquote_plus((detail.get("object") or {}).get("key", ""))
         if bucket == os.environ.get("REPORTS_BUCKET"):
+            coh = os.environ.get("COH_PREFIX", "")
+            if coh and key.startswith(coh + "/"):
+                return recommendations.handle(bucket, key)
             return costs.handle(bucket, key)
         if bucket == os.environ.get("TRAIL_BUCKET"):
             return trail.handle(bucket, key)
+        if bucket == os.environ.get("LOGS_BUCKET"):
+            return traffic.handle(bucket, key)
         return {"skipped": bucket}
     if "requestContext" in event:
         return api(event)
@@ -136,7 +149,8 @@ def daily():
     steps = (("budgets", costs.refresh_budgets),) if costs.budgets_on() else ()
     for name, step in (*steps, ("findings", lambda: len(costs.check(today))),
                        ("digest", lambda: mail.send_digest(common.days_before(today, 1))),
-                       ("combinations", lambda: combos.compact_recent(today))):
+                       ("combinations", lambda: combos.compact_recent(today)),
+                       ("traffic", lambda: traffic.compact_recent(today))):
         try:
             value = step()
             result[name] = value if isinstance(value, int) else "ok"
@@ -204,6 +218,14 @@ def route(method, parts, event, me):
     if parts == ["findings"] and method == "PATCH":
         require(admin)
         return response(200, acknowledge(body_json(event), me))
+    if parts == ["recommendations"] and method == "GET":
+        return response(200, public(common.get("RECOMMENDATIONS", "SNAPSHOT") or {"items": [], "count": 0}))
+    if parts == ["traffic"] and method == "GET":
+        return response(200, {"sources": traffic.sources()})
+    if parts == ["traffic", "days"] and method == "GET":
+        return response(200, traffic_days(event))
+    if parts == ["traffic", "day"] and method == "GET":
+        return response(200, traffic_day(event))
     if parts == ["rules"] and method == "GET":
         return response(200, {"rules": rule_list(), "settings": common.rules_settings()})
     if parts == ["version"] and method == "GET":
@@ -323,6 +345,34 @@ def trail_summary(event):
         raise ApiError(400, "bad_range")
     fields, errors_only, writes_only, text = filter_params(event)
     return combos.summary(first, last, day, combos.matcher(fields, errors_only, writes_only, text))
+
+
+# Traffic ----------------------------------------------------------------------
+
+def traffic_source(event):
+    source = query_param(event, "source")
+    if not traffic.SOURCE_RE.fullmatch(source):
+        raise ApiError(400, "bad_source")
+    return source
+
+
+def traffic_days(event):
+    source = traffic_source(event)
+    last = query_param(event, "to") or common.day_of(common.now_utc())
+    first = query_param(event, "from") or common.days_before(last, 13)
+    if not DAY_RE.fullmatch(first) or not DAY_RE.fullmatch(last) or first > last:
+        raise ApiError(400, "bad_range")
+    if (datetime.strptime(last, "%Y-%m-%d") - datetime.strptime(first, "%Y-%m-%d")).days >= TRAIL_DAYS_MAX:
+        raise ApiError(400, "bad_range")
+    return {"source": source, "days": traffic.days(source, first, last)}
+
+
+def traffic_day(event):
+    source = traffic_source(event)
+    day = query_param(event, "day") or common.day_of(common.now_utc())
+    if not DAY_RE.fullmatch(day):
+        raise ApiError(400, "bad_day")
+    return {"source": source, "day": day, "counts": traffic.day(source, day)}
 
 
 # Findings ---------------------------------------------------------------------

@@ -9,7 +9,7 @@ resource "aws_cloudwatch_log_group" "lambda" {
 data "archive_file" "app" {
   type = "zip"
   dynamic "source" {
-    for_each = toset(["app.py", "common.py", "costs.py", "trail.py", "rules.py", "mail.py", "sso.py", "combos.py", "backfill.py"])
+    for_each = toset(["app.py", "common.py", "costs.py", "trail.py", "rules.py", "mail.py", "sso.py", "combos.py", "backfill.py", "recommendations.py", "traffic.py"])
 
     content {
       content  = file("${path.module}/lambda/${source.value}")
@@ -64,6 +64,9 @@ resource "aws_lambda_function" "app" {
       ALLOWED_REGIONS     = join(",", var.allowed_regions)
       EVENT_DAYS          = tostring(var.event_days)
       TRAIL_BUCKET        = local.trail ? var.trail_bucket : ""
+      COH_PREFIX          = var.coh_prefix
+      SAVINGS_MIN_USD     = tostring(var.savings_min_usd)
+      LOGS_BUCKET         = local.traffic ? var.logs_bucket : ""
       BUDGETS             = tostring(local.budgets)
     }
   }
@@ -83,24 +86,26 @@ resource "aws_lambda_function_event_invoke_config" "app" {
   maximum_retry_attempts = 0
 }
 
-# A manifest of the Data Export: a refresh of the costs of a month is
-# complete. The bucket has to send its events to EventBridge.
+# A manifest of a Data Export: a refresh of the costs of a month, or of the
+# recommendations of Cost Optimization Hub, is complete. The bucket has to
+# send its events to EventBridge.
 resource "aws_cloudwatch_event_rule" "report" {
   count = local.costs ? 1 : 0
 
   name        = "${local.name}-report"
-  description = "A new Cost and Usage Report for ${local.name}."
+  description = "A new Cost and Usage Report or new recommendations for ${local.name}."
   event_pattern = jsonencode({
     source      = ["aws.s3"]
     detail-type = ["Object Created"]
     detail = {
       bucket = { name = [var.reports_bucket] }
-      object = { key = [{ wildcard = "${var.cur_prefix}/metadata/*Manifest.json" }] }
+      object = { key = [for prefix in compact([var.cur_prefix, var.coh_prefix]) : { wildcard = "${prefix}/metadata/*Manifest.json" }] }
     }
   })
 }
 
-# A log file of CloudTrail; the digests (CloudTrail-Digest/) do not match.
+# A log file of CloudTrail or of its Insights; the digests
+# (CloudTrail-Digest/) do not match.
 resource "aws_cloudwatch_event_rule" "trail" {
   count = local.trail ? 1 : 0
 
@@ -111,7 +116,23 @@ resource "aws_cloudwatch_event_rule" "trail" {
     detail-type = ["Object Created"]
     detail = {
       bucket = { name = [var.trail_bucket] }
-      object = { key = [{ wildcard = "*/CloudTrail/*.json.gz" }] }
+      object = { key = [{ wildcard = "*/CloudTrail/*.json.gz" }, { wildcard = "*/CloudTrail-Insight/*.json.gz" }] }
+    }
+  })
+}
+
+# An access log of a site or a bucket in logs_bucket.
+resource "aws_cloudwatch_event_rule" "logs" {
+  count = local.traffic ? 1 : 0
+
+  name        = "${local.name}-logs"
+  description = "A new access log for ${local.name}."
+  event_pattern = jsonencode({
+    source      = ["aws.s3"]
+    detail-type = ["Object Created"]
+    detail = {
+      bucket = { name = [var.logs_bucket] }
+      object = { key = [{ prefix = "cloudfront/" }, { prefix = "s3/" }] }
     }
   })
 }
@@ -136,6 +157,13 @@ resource "aws_cloudwatch_event_target" "trail" {
   arn  = aws_lambda_function.app.arn
 }
 
+resource "aws_cloudwatch_event_target" "logs" {
+  count = local.traffic ? 1 : 0
+
+  rule = aws_cloudwatch_event_rule.logs[0].name
+  arn  = aws_lambda_function.app.arn
+}
+
 resource "aws_cloudwatch_event_target" "daily" {
   rule  = aws_cloudwatch_event_rule.daily.name
   arn   = aws_lambda_function.app.arn
@@ -147,6 +175,7 @@ resource "aws_lambda_permission" "events" {
     { daily = aws_cloudwatch_event_rule.daily.arn },
     local.costs ? { report = aws_cloudwatch_event_rule.report[0].arn } : {},
     local.trail ? { trail = aws_cloudwatch_event_rule.trail[0].arn } : {},
+    local.traffic ? { logs = aws_cloudwatch_event_rule.logs[0].arn } : {},
   )
 
   statement_id  = "AllowEventBridge-${each.key}"
