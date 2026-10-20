@@ -1,0 +1,181 @@
+{
+  "account": "123456789012",
+  "costs": {
+    "months": 3,
+    "jitter": 0.25,
+    "services": [
+      { "code": "AmazonCloudFront", "region": "global", "project": "website", "daily": 0.045, "usage": "EU-DataTransfer-Out-Bytes" },
+      { "code": "AmazonS3", "region": "eu-central-1", "project": "website", "daily": 0.021, "usage": "EUC1-TimedStorage-ByteHrs" },
+      { "code": "AWSLambda", "region": "eu-central-1", "project": "orders", "daily": 0.012, "usage": "EUC1-Lambda-GB-Second-ARM" },
+      { "code": "AmazonDynamoDB", "region": "eu-central-1", "project": "orders", "daily": 0.009, "usage": "EUC1-WriteRequestUnits" },
+      { "code": "AmazonApiGateway", "region": "eu-central-1", "project": "orders", "daily": 0.006, "usage": "EUC1-ApiGatewayHttpRequest" },
+      { "code": "AmazonEC2", "region": "eu-central-1", "project": "build", "daily": 0.11, "usage": "EUC1-BoxUsage:t4g.small", "weekdays": true },
+      { "code": "AmazonCloudWatch", "region": "eu-central-1", "project": "", "daily": 0.007, "usage": "EUC1-TimedStorage-ByteHrs" },
+      { "code": "AWSKMS", "region": "eu-central-1", "project": "orders", "daily": 0.033, "usage": "eu-central-1-KMS-Keys" },
+      { "code": "AmazonSES", "region": "eu-central-1", "project": "mail", "daily": 0.004, "usage": "EUC1-Recipients" },
+      { "code": "AmazonRoute53", "region": "global", "project": "website", "monthly": 1.0, "usage": "HostedZone" },
+      { "code": "AWSSecretsManager", "region": "eu-central-1", "project": "orders", "monthly": 0.4, "usage": "EUC1-AWSSecretsManager-Secrets" },
+      { "code": "AmazonBedrock", "region": "eu-central-1", "project": "assistant", "daily": 0.05, "usage": "EUC1-Nova2Lite-input-tokens", "this_month": true }
+    ],
+    "spike": { "days_ago": 2, "code": "AmazonEC2", "region": "eu-central-1", "project": "build", "amount": 2.9, "usage": "EUC1-BoxUsage:g5.xlarge" },
+    "tax_rate": 0.19,
+    "credits": [{ "months_ago": 2, "amount": -1.5 }],
+    "budgets": [
+      { "name": "monthly-total", "limit": 10 },
+      { "name": "build-ec2", "limit": 3, "service": "AmazonEC2" }
+    ]
+  },
+  "trail": {
+    "days": 30,
+    "learned_days_ago": 2,
+    "principals": {
+      "terraform": {
+        "identity": { "type": "AssumedRole", "role": "Terraform", "session": "github-actions" },
+        "ip": "140.82.112.21",
+        "agent": "APN/1.0 HashiCorp/1.0 Terraform/1.16.3 (+https://www.terraform.io) terraform-provider-aws/6.20.0"
+      },
+      "alice": {
+        "identity": { "type": "AssumedRole", "role": "AWSReservedSSO_AdministratorAccess_4f1c2a9b7d3e", "session": "alice@example.com" },
+        "ip": "198.51.100.23",
+        "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"
+      },
+      "bob": {
+        "identity": { "type": "AssumedRole", "role": "AWSReservedSSO_ReadOnlyAccess_8e2d5b1c6a0f", "session": "bob@example.com" },
+        "ip": "192.0.2.44",
+        "agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0"
+      },
+      "ci": {
+        "identity": { "type": "IAMUser", "user": "ci" },
+        "ip": "52.58.10.7",
+        "agent": "aws-cli/2.31.0 md/awscrt#0.28.1 ua/2.1 os/linux#6.8 md/arch#x86_64 lang/python#3.13"
+      },
+      "orders": {
+        "identity": { "type": "AssumedRole", "role": "orders-api", "session": "orders-api" },
+        "ip": "3.120.181.40",
+        "agent": "Boto3/1.40.50 md/Botocore#1.40.50 ua/2.1 os/linux exec-env/AWS_Lambda_python3.14"
+      },
+      "root": {
+        "identity": { "type": "Root" },
+        "ip": "198.51.100.23",
+        "agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"
+      },
+      "contractor": {
+        "identity": { "type": "IAMUser", "user": "contractor" },
+        "ip": "203.0.113.77",
+        "agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36"
+      },
+      "lambda": { "identity": { "type": "AWSService", "service": "lambda.amazonaws.com" } },
+      "config": { "identity": { "type": "AWSService", "service": "config.amazonaws.com" } }
+    },
+    "routine": [
+      {
+        "principal": "terraform", "weekdays": true, "runs": [1, 3], "hours": [8, 18],
+        "calls": [
+          { "source": "s3", "names": ["GetBucketPolicy", "GetBucketAcl", "GetBucketVersioning", "GetBucketEncryption", "GetBucketLifecycle", "GetBucketCors", "ListBuckets"], "per_run": 40 },
+          { "source": "s3", "names": ["GetBucketReplication"], "per_run": 3, "error": "ReplicationConfigurationNotFoundError" },
+          { "source": "lambda", "names": ["GetFunction", "GetPolicy", "ListVersionsByFunction", "GetFunctionCodeSigningConfig"], "per_run": 16 },
+          { "source": "iam", "region": "us-east-1", "names": ["GetRole", "GetRolePolicy", "ListRolePolicies", "ListAttachedRolePolicies"], "per_run": 20 },
+          { "source": "cloudfront", "region": "us-east-1", "names": ["GetDistribution", "GetCachePolicy", "GetResponseHeadersPolicy", "ListTagsForResource"], "per_run": 10 },
+          { "source": "dynamodb", "names": ["DescribeTable", "DescribeContinuousBackups", "DescribeTimeToLive", "ListTagsOfResource"], "per_run": 8 },
+          { "source": "apigateway", "names": ["GetApi", "GetStages", "GetRoutes", "GetIntegrations"], "per_run": 8 },
+          { "source": "cognito-idp", "names": ["DescribeUserPool", "DescribeUserPoolClient", "GetGroup"], "per_run": 6 },
+          { "source": "logs", "names": ["DescribeLogGroups", "ListTagsForResource"], "per_run": 6 },
+          { "source": "events", "names": ["DescribeRule", "ListTargetsByRule"], "per_run": 4 },
+          { "source": "sts", "names": ["GetCallerIdentity"], "per_run": 2 },
+          { "source": "lambda", "names": ["UpdateFunctionCode20150331v2", "UpdateFunctionConfiguration20150331v2"], "per_run": 2, "write": true, "chance": 0.7 },
+          { "source": "cloudfront", "region": "us-east-1", "names": ["CreateInvalidation"], "per_run": 1, "write": true, "chance": 0.5 },
+          { "source": "s3", "names": ["PutBucketTagging"], "per_run": 1, "write": true, "chance": 0.2 },
+          { "source": "iam", "region": "us-east-1", "names": ["PutRolePolicy"], "per_run": 1, "write": true, "chance": 0.08,
+            "params": { "roleName": "orders-api", "policyName": "orders-api", "policyDocument": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\"],\"Resource\":\"arn:aws:dynamodb:eu-central-1:123456789012:table/orders\"}]}" } }
+        ]
+      },
+      {
+        "principal": "alice", "weekdays": true, "runs": [1, 1], "hours": [8, 17], "signin": true,
+        "calls": [
+          { "source": "ce", "region": "us-east-1", "names": ["GetCostAndUsage", "GetCostForecast"], "per_run": 8 },
+          { "source": "cloudtrail", "names": ["LookupEvents", "DescribeTrails", "GetTrailStatus"], "per_run": 10 },
+          { "source": "ec2", "names": ["DescribeInstances", "DescribeSecurityGroups", "DescribeVpcs", "DescribeRegions"], "per_run": 24 },
+          { "source": "s3", "names": ["ListBuckets", "GetBucketLocation", "ListObjectsV2"], "per_run": 14 },
+          { "source": "lambda", "names": ["ListFunctions20150331", "GetFunction20150331v2"], "per_run": 10 },
+          { "source": "health", "region": "us-east-1", "names": ["DescribeEventAggregates"], "per_run": 3 },
+          { "source": "ec2", "names": ["DescribeAddressesAttribute"], "per_run": 2, "error": "Client.UnauthorizedOperation", "chance": 0.3 },
+          { "source": "ec2", "names": ["StopInstances", "StartInstances"], "per_run": 1, "write": true, "chance": 0.3 }
+        ]
+      },
+      {
+        "principal": "bob", "weekdays": true, "runs": [0, 1], "hours": [9, 16], "signin": true,
+        "calls": [
+          { "source": "ce", "region": "us-east-1", "names": ["GetCostAndUsage"], "per_run": 6 },
+          { "source": "cloudwatch", "names": ["GetMetricData", "DescribeAlarms"], "per_run": 12 },
+          { "source": "dynamodb", "names": ["DescribeTable", "ListTables"], "per_run": 4 },
+          { "source": "dynamodb", "names": ["UpdateTable"], "per_run": 1, "write": true, "error": "AccessDeniedException", "chance": 0.15 }
+        ]
+      },
+      {
+        "principal": "ci", "weekdays": true, "runs": [2, 5], "hours": [7, 20],
+        "calls": [
+          { "source": "sts", "names": ["GetCallerIdentity"], "per_run": 1 },
+          { "source": "ecr", "names": ["GetAuthorizationToken", "DescribeRepositories", "DescribeImages"], "per_run": 4 },
+          { "source": "ecr", "names": ["PutImage"], "per_run": 1, "write": true, "chance": 0.6 }
+        ]
+      },
+      {
+        "principal": "orders", "runs": [24, 24], "hours": [0, 23],
+        "calls": [
+          { "source": "kms", "names": ["Decrypt", "GenerateDataKey"], "per_run": 4 },
+          { "source": "secretsmanager", "names": ["GetSecretValue"], "per_run": 1 },
+          { "source": "ssm", "names": ["GetParameter"], "per_run": 1, "chance": 0.5 }
+        ]
+      },
+      {
+        "principal": "lambda", "runs": [24, 24], "hours": [0, 23],
+        "calls": [
+          { "source": "sts", "names": ["AssumeRole"], "per_run": 3, "event_type": "AwsServiceEvent" },
+          { "source": "kms", "names": ["Decrypt"], "per_run": 1 }
+        ]
+      },
+      {
+        "principal": "config", "runs": [6, 6], "hours": [0, 23],
+        "calls": [
+          { "source": "s3", "names": ["GetBucketPolicyStatus", "GetBucketPublicAccessBlock"], "per_run": 4 },
+          { "source": "iam", "region": "us-east-1", "names": ["ListPolicies", "GetAccountAuthorizationDetails"], "per_run": 2 }
+        ]
+      }
+    ],
+    "incidents": [
+      { "days_ago": 13, "time": "07:42", "principal": "root", "calls": [
+        { "source": "signin", "region": "us-east-1", "name": "ConsoleLogin", "result": "Success", "mfa": "Yes" },
+        { "source": "account", "region": "us-east-1", "name": "PutAlternateContact", "write": true, "params": { "alternateContactType": "SECURITY" } },
+        { "source": "billing", "region": "us-east-1", "name": "UpdateBillingPreferences", "write": true }
+      ] },
+      { "days_ago": 9, "time": "16:05", "principal": "alice", "calls": [
+        { "source": "cloudtrail", "name": "StopLogging", "write": true, "params": { "name": "arn:aws:cloudtrail:eu-central-1:123456789012:trail/management-events" } },
+        { "source": "cloudtrail", "name": "StartLogging", "write": true, "params": { "name": "arn:aws:cloudtrail:eu-central-1:123456789012:trail/management-events" }, "after": 4 }
+      ] },
+      { "days_ago": 6, "time": "11:20", "principal": "terraform", "calls": [
+        { "source": "iam", "region": "us-east-1", "name": "CreateUser", "write": true, "params": { "userName": "contractor" } },
+        { "source": "iam", "region": "us-east-1", "name": "CreateLoginProfile", "write": true, "params": { "userName": "contractor", "passwordResetRequired": true } },
+        { "source": "iam", "region": "us-east-1", "name": "AttachUserPolicy", "write": true, "params": { "userName": "contractor", "policyArn": "arn:aws:iam::aws:policy/PowerUserAccess" } }
+      ] },
+      { "days_ago": 4, "time": "14:31", "principal": "alice", "calls": [
+        { "source": "ec2", "name": "AuthorizeSecurityGroupIngress", "write": true, "params": { "groupId": "sg-0a1b2c3d4e5f60789", "ipPermissions": { "items": [{ "ipProtocol": "tcp", "fromPort": 22, "toPort": 22, "ipRanges": { "items": [{ "cidrIp": "0.0.0.0/0" }] } }] } } },
+        { "source": "ec2", "name": "RevokeSecurityGroupIngress", "write": true, "params": { "groupId": "sg-0a1b2c3d4e5f60789" }, "after": 38 }
+      ] },
+      { "days_ago": 2, "time": "03:12", "principal": "contractor", "calls": [
+        { "source": "signin", "region": "us-east-1", "name": "ConsoleLogin", "result": "Failure", "mfa": "No", "error_message": "Failed authentication", "count": 3 },
+        { "source": "signin", "region": "us-east-1", "name": "ConsoleLogin", "result": "Success", "mfa": "No", "after": 2 },
+        { "source": "ec2", "region": "us-west-2", "name": "RunInstances", "write": true, "after": 6, "params": { "instanceType": "g5.xlarge", "minCount": 1, "maxCount": 1 } },
+        { "source": "s3", "name": "PutBucketPolicy", "write": true, "after": 9, "params": { "bucketName": "orders-exports-123456789012", "bucketPolicy": { "Version": "2012-10-17", "Statement": [{ "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject", "Resource": "arn:aws:s3:::orders-exports-123456789012/*" }] } } },
+        { "source": "iam", "region": "us-east-1", "name": "CreateAccessKey", "write": true, "after": 11, "params": { "userName": "contractor" } }
+      ] },
+      { "days_ago": 1, "time": "10:15", "principal": "orders", "calls": [
+        { "source": "kms", "name": "Decrypt", "error": "AccessDeniedException", "error_message": "User is not authorized to perform: kms:Decrypt", "count": 24 }
+      ] },
+      { "days_ago": 1, "time": "10:40", "principal": "terraform", "calls": [
+        { "source": "iam", "region": "us-east-1", "name": "DeleteUser", "write": true, "params": { "userName": "contractor" } },
+        { "source": "kms", "name": "PutKeyPolicy", "write": true, "params": { "keyId": "mrk-1a2b3c4d5e6f", "policyName": "default" } }
+      ] }
+    ],
+    "acknowledged": ["root_activity", "trail_tampering"]
+  }
+}
