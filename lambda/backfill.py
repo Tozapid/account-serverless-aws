@@ -19,7 +19,7 @@ files, counts each call once:
   (pk = COMBOS#<day>, sk = DAY) are written anew, and the items of the files
   of the live loading it now holds are deleted;
 - the events worth showing, as trail.py keeps them.
-A day with no logs in S3 (the bucket keeps them a year) is left as it is.
+A day with no logs in S3 (gone with the lifecycle of the bucket) is left as it is.
 No finding is made and nothing is mailed or learned of principals and
 addresses: an old event is not news.
 
@@ -49,7 +49,7 @@ import costs
 import rules
 import trail
 
-MAX_DAYS = 1100
+MAX_DAYS = 1830
 KEEP_DAYS_MAX = 3650
 JOB_DAYS = 365
 JOBS_LISTED = 20

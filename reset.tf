@@ -26,7 +26,7 @@ data "archive_file" "reset" {
   output_file_mode = "0644"
 
   dynamic "source" {
-    for_each = toset(["reset.py", "common.py", "costs.py", "trail.py", "rules.py", "mail.py", "sso.py", "combos.py"])
+    for_each = toset(["reset.py", "common.py", "costs.py", "trail.py", "rules.py", "mail.py", "sso.py", "combos.py", "recommendations.py", "traffic.py"])
     content {
       content  = file("${path.module}/lambda/${source.value}")
       filename = source.value

@@ -3,8 +3,9 @@
 A rule has an id, a severity and a source. "critical" is mailed at once to
 the users who want alerts; "warning" goes into the daily digest. Each rule of
 CloudTrail looks at one record (check); those that need more than one record
-(new principals, new sign-in addresses, bursts of denied calls) and the rules
-of the costs live in trail.py and costs.py, with their ids listed here so that
+(new principals, new sign-in addresses, bursts of denied calls, CloudTrail
+Insights) and the rules of the costs live in trail.py, costs.py and
+recommendations.py, with their ids listed here so that
 the page and the settings know every rule.
 
 A record that failed (errorCode) changed nothing, so the rules of changes skip
@@ -35,10 +36,12 @@ RULES = {
     "new_principal": (WARNING, "trail"),
     "new_login_ip": (WARNING, "trail"),
     "access_denied": (WARNING, "trail"),
+    "insight": (WARNING, "trail"),
     "budget_exceeded": (CRITICAL, "cost"),
     "budget_forecast": (WARNING, "cost"),
     "cost_spike": (WARNING, "cost"),
     "new_service": (WARNING, "cost"),
+    "savings": (WARNING, "cost"),
 }
 
 TRAIL_CHANGES = {"StopLogging", "DeleteTrail", "UpdateTrail", "PutEventSelectors", "PutInsightSelectors",

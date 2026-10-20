@@ -60,6 +60,20 @@ class ResetTest(unittest.TestCase):
                      "console_login_failed", "console_login_no_mfa", "new_principal", "new_login_ip", "access_denied",
                      "cost_spike", "new_service"):
             self.assertIn(rule, found)
+        for rule in ("insight", "savings"):
+            self.assertIn(rule, found)
+        # Recommendations, by savings, and the traffic of the sources of the seed.
+        _, recs = self.call("GET", "/api/recommendations")
+        self.assertEqual(recs["count"], len(self.seed["recommendations"]["rows"]))
+        self.assertEqual(recs["items"][0]["resource"], "i-0a1b2c3d4e5f60718")
+        _, sources = self.call("GET", "/api/traffic")
+        self.assertEqual({item["source"] for item in sources["sources"]}, {item["source"] for item in self.seed["traffic"]["sources"]})
+        yesterday = common.days_before(today, 1)
+        _, site = self.call("GET", "/api/traffic/days", params={"source": "cloudfront/website", "from": common.days_before(today, 13), "to": today})
+        self.assertTrue(all(site["days"][day] and site["days"][day]["requests"] > 0 for day in site["days"] if day != today))
+        self.assertIsNotNone(common.get("TRAFFIC#cloudfront/website#" + yesterday, "DAY"))
+        _, bucket = self.call("GET", "/api/traffic/day", params={"source": "s3/orders-uploads-123456789012", "day": yesterday})
+        self.assertIn("role/orders-api/orders-api", bucket["counts"]["requesters"])
         # Only the incidents are news: the routine was learned first.
         principals = {item.get("principal") for item in common.query_all("FINDINGS") if item["rule"] == "new_principal"}
         self.assertEqual(principals, {"user/contractor"})
@@ -91,8 +105,10 @@ class ResetTest(unittest.TestCase):
         self.assertIsNone(common.get("USER#" + DEMO, "PREFS"))
         self.assertFalse(common.get("FINDINGS", finding["sk"]).get("ack"))
         self.assertGreaterEqual(len(self.fakes["table"].items), events - 2)
+        self.assertGreater(result["requests"], 0)
         # The same hour again adds nothing.
-        self.assertEqual(reset.handler({}, None)["records"], 0)
+        again = reset.handler({}, None)
+        self.assertEqual((again["records"], again["requests"]), (0, 0))
 
     def test_demo_is_read_only_where_it_matters(self):
         os.environ["DEMO"] = "true"

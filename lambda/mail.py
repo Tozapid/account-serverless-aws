@@ -64,10 +64,12 @@ TEXT = {
             "new_principal": "A new principal made changes",
             "new_login_ip": "Sign-in from a new address",
             "access_denied": "Many denied calls",
+            "insight": "Unusual activity (CloudTrail Insights)",
             "budget_exceeded": "A budget is exceeded",
             "budget_forecast": "A budget is forecast to be exceeded",
             "cost_spike": "A cost spike",
             "new_service": "A new paid service",
+            "savings": "A way to save money",
         },
     },
     "ru": {
@@ -111,10 +113,12 @@ TEXT = {
             "new_principal": "Изменения от нового участника",
             "new_login_ip": "Вход с нового адреса",
             "access_denied": "Много отказов в доступе",
+            "insight": "Необычная активность (CloudTrail Insights)",
             "budget_exceeded": "Бюджет превышен",
             "budget_forecast": "Бюджет будет превышен по прогнозу",
             "cost_spike": "Скачок расходов",
             "new_service": "Новый платный сервис",
+            "savings": "Можно сэкономить",
         },
     },
     "fr": {
@@ -158,10 +162,12 @@ TEXT = {
             "new_principal": "Un nouveau principal a fait des modifications",
             "new_login_ip": "Connexion depuis une nouvelle adresse",
             "access_denied": "Beaucoup d’appels refusés",
+            "insight": "Activité inhabituelle (CloudTrail Insights)",
             "budget_exceeded": "Un budget est dépassé",
             "budget_forecast": "Un budget sera dépassé selon la prévision",
             "cost_spike": "Un pic de coûts",
             "new_service": "Un nouveau service payant",
+            "savings": "Une économie possible",
         },
     },
     "it": {
@@ -205,10 +211,12 @@ TEXT = {
             "new_principal": "Un nuovo principal ha fatto modifiche",
             "new_login_ip": "Accesso da un nuovo indirizzo",
             "access_denied": "Molte chiamate negate",
+            "insight": "Attività insolita (CloudTrail Insights)",
             "budget_exceeded": "Un budget è superato",
             "budget_forecast": "Un budget sarà superato secondo la previsione",
             "cost_spike": "Un picco di costi",
             "new_service": "Un nuovo servizio a pagamento",
+            "savings": "Un risparmio possibile",
         },
     },
 }
@@ -281,6 +289,12 @@ def describe(item, words):
         parts = [details.get("day", ""), money(details.get("amount", 0)), words["median"].format(median=money(details.get("median", 0)))]
     elif rule == "new_service":
         parts = [details.get("service", ""), money(details.get("amount", 0))]
+    elif rule == "insight":
+        parts = [f"{item.get('event_source', '')}:{item.get('event_name', '')}", details.get("type", ""), item.get("region", ""),
+                 (item.get("time") or "").replace("T", " ").replace("Z", " UTC")]
+    elif rule == "savings":
+        parts = [details.get("action", ""), details.get("type", ""), details.get("resource", ""),
+                 money(details.get("savings", 0), details.get("currency", "USD"))]
     elif rule == "access_denied":
         parts = [item.get("principal", ""), item.get("day", "")]
     else:

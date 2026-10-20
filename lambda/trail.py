@@ -21,6 +21,10 @@ few minutes of one region. From it:
 - the calls by combination of principal, service, region and the rest
   (combos.py), which the filters of the page count on.
 
+The files of CloudTrail Insights (*/CloudTrail-Insight/*) hold no calls but
+an unusual rate of the calls or the errors of one API against the trail's
+own baseline: the start of one is a finding (insight), its end closes it.
+
 Administrators may turn rules off and ignore principals; an ignored
 principal is still counted, but no rule looks at it.
 """
@@ -47,7 +51,7 @@ RETRIES = 10
 def handle(bucket, key):
     body = common.client("s3").get_object(Bucket=bucket, Key=key)["Body"].read()
     records = json.loads(gzip.decompress(body)).get("Records") or []
-    result = process(records, combos.file_id(key))
+    result = insights(records) if "/CloudTrail-Insight/" in key else process(records, combos.file_id(key))
     common.logger.info("%s: %s", key, json.dumps(result))
     return result
 
@@ -111,6 +115,34 @@ def kind(record):
 def worth_keeping(record):
     return (rules.write(record) or bool(record.get("errorCode")) or rules.signin(record)
             or (record.get("userIdentity") or {}).get("type") == "Root")
+
+
+# Insights --------------------------------------------------------------------------
+
+def insights(records):
+    muted = set(common.rules_settings()["muted"])
+    found = []
+    for record in records:
+        details = record.get("insightDetails") or {}
+        if details.get("state") != "Start" or "insight" in muted or not record.get("eventTime"):
+            continue
+        context = details.get("insightContext") or {}
+        statistics = context.get("statistics") or {}
+        who = next((entry for entry in context.get("attributions") or [] if entry.get("attribute") == "userIdentityArn"), {})
+        top = (who.get("insight") or [{}])[0].get("value", "")
+        item = common.save_finding(
+            "insight", rules.RULES["insight"][0], "trail", record["eventTime"],
+            record.get("sharedEventID") or record.get("eventID") or record["eventTime"],
+            event_name=details.get("eventName"), event_source=(details.get("eventSource") or "").replace(".amazonaws.com", ""),
+            region=record.get("awsRegion"), day=record["eventTime"][:10], error=details.get("errorCode"),
+            details={name: value for name, value in {
+                "type": details.get("insightType", ""), "baseline": (statistics.get("baseline") or {}).get("average"),
+                "average": (statistics.get("insight") or {}).get("average"), "duration": statistics.get("insightDuration"),
+                "who": top}.items() if value not in (None, "")},
+        )
+        if item:
+            found.append(item)
+    return {"insights": len(found)}
 
 
 # Counters --------------------------------------------------------------------------

@@ -10,13 +10,16 @@ import common
 import costs
 import fakes
 import mail
+import recommendations
 import rules
+import traffic
 import trail
 
 OWNER = "owner@example.com"
 TRAIL_BUCKET = "trail-bucket"
 REPORTS_BUCKET = "reports-bucket"
 PREFIX = "cur/account-serverless"
+LOGS_BUCKET = "logs-bucket"
 
 
 def record(name, source="iam", who=None, time="2026-10-17T10:00:00Z", event_id=None, **fields):
@@ -38,7 +41,8 @@ class Base(unittest.TestCase):
                            "SITE_URL": "https://aws.example.com", "REPORTS_BUCKET": REPORTS_BUCKET, "TRAIL_BUCKET": TRAIL_BUCKET,
                            "CUR_PREFIX": PREFIX, "COST_TAG": "Project", "SPIKE_FACTOR": "2", "SPIKE_MIN_USD": "0.5",
                            "ALLOWED_REGIONS": "eu-central-1,us-east-1", "EVENT_DAYS": "90", "ADMIN_GROUP": "admins",
-                           "AWS_LAMBDA_FUNCTION_NAME": "account-serverless"})
+                           "AWS_LAMBDA_FUNCTION_NAME": "account-serverless",
+                           "COH_PREFIX": "coh/cost-optimization", "SAVINGS_MIN_USD": "1", "LOGS_BUCKET": LOGS_BUCKET})
         self.fakes["cognito-idp"].add(OWNER)
 
     def findings(self):
@@ -484,7 +488,7 @@ class BackfillTest(Base):
     def test_checks_one_at_a_time_and_stop(self):
         yesterday = common.days_before(common.day_of(common.now_utc()), 1)
         self.assertEqual(self.start(to=common.day_of(common.now_utc()))[1]["code"], "bad_backfill_range")
-        self.assertEqual(self.start(**{"from": "2023-01-01", "to": yesterday})[1]["code"], "bad_backfill_range")
+        self.assertEqual(self.start(**{"from": "2020-01-01", "to": yesterday})[1]["code"], "bad_backfill_range")
         self.assertEqual(self.start(keep_days=0)[1]["code"], "bad_keep")
         self.assertEqual(self.start(trail=False)[1]["code"], "bad_backfill_kinds")
         self.assertEqual(self.call("POST", "/api/admin/backfill", {}, admin=False)[1]["code"], "admin_only")
@@ -495,6 +499,103 @@ class BackfillTest(Base):
         self.assertEqual(self.finish(job)["status"], "stopped")
         self.assertEqual(self.start()[0], 202)
         self.assertEqual(self.call("DELETE", "/api/admin/backfill", params={"id": "nope"}, admin=True)[0], 404)
+
+
+class InsightsTest(Base):
+    def test_start_is_a_finding_once(self):
+        start = {"eventVersion": "1.08", "eventTime": "2026-10-17T10:00:00Z", "awsRegion": "eu-central-1", "eventID": "i1",
+                 "sharedEventID": "shared-1", "eventType": "AwsCloudTrailInsight", "eventCategory": "Insight",
+                 "insightDetails": {"state": "Start", "eventSource": "iam.amazonaws.com", "eventName": "DeleteUser",
+                                    "insightType": "ApiCallRateInsight",
+                                    "insightContext": {"statistics": {"baseline": {"average": 0.01}, "insight": {"average": 4.5},
+                                                                      "insightDuration": 3},
+                                                       "attributions": [{"attribute": "userIdentityArn",
+                                                                         "insight": [{"value": "arn:aws:iam::1:user/x", "average": 4.5}]}]}}}
+        end = {**start, "eventID": "i2", "insightDetails": {**start["insightDetails"], "state": "End"}}
+        key = "AWSLogs/1/CloudTrail-Insight/eu-central-1/2026/10/17/1_CloudTrail-Insight_eu-central-1_20261017T1000Z_a.json.gz"
+        self.fakes["s3"].put_json_gz(TRAIL_BUCKET, key, {"Records": [start, end]})
+        event = {"source": "aws.s3", "detail": {"bucket": {"name": TRAIL_BUCKET}, "object": {"key": key}}}
+        self.assertEqual(app.handler(event, None), {"insights": 1})
+        self.assertEqual(app.handler(event, None), {"insights": 0})
+        found = self.findings()[0]
+        self.assertEqual((found["rule"], found["event_name"], found["event_source"]), ("insight", "DeleteUser", "iam"))
+        self.assertEqual(common.plain(found["details"])["who"], "arn:aws:iam::1:user/x")
+        # Not a call: the counters of the day are untouched.
+        self.assertNotIn(("TRAIL", "DAY#2026-10-17"), self.table.items)
+        self.assertIn("CloudTrail Insights", mail.describe(found, mail.TEXT["en"]) + mail.TEXT["en"]["rules"]["insight"])
+
+
+class RecommendationsTest(Base):
+    def row(self, rid, savings, **fields):
+        return {"recommendation_id": rid, "action_type": "Rightsize", "current_resource_type": "Ec2Instance",
+                "recommended_resource_type": "Ec2Instance", "current_resource_summary": "t3.large",
+                "recommended_resource_summary": "t4g.small", "resource_arn": "arn:aws:ec2:eu-central-1:1:instance/i-0abc",
+                "region": "eu-central-1", "estimated_monthly_cost_before_discount": "60.0",
+                "estimated_monthly_savings_after_discount": str(savings), "estimated_monthly_savings_before_discount": str(savings),
+                "estimated_savings_percentage_after_discount": "75", "currency_code": "USD", "implementation_effort": "Medium",
+                "restart_needed": "true", "rollback_possible": "true", "recommendation_source": "ComputeOptimizer",
+                "last_refresh_timestamp": "2026-10-19 04:00:00", "tags": json.dumps({"Project": "build"}), **fields}
+
+    def test_snapshot_and_findings(self):
+        data = "coh/cost-optimization/data/BILLING_PERIOD=2026-10/cost-optimization-00001.csv.gz"
+        self.fakes["s3"].put_csv_gz(REPORTS_BUCKET, data, [self.row("r1", 45), self.row("r2", 0.4, action_type="Delete")])
+        manifest = "coh/cost-optimization/metadata/BILLING_PERIOD=2026-10/cost-optimization-Manifest.json"
+        self.fakes["s3"].put(REPORTS_BUCKET, manifest, b"{}")
+        event = {"source": "aws.s3", "detail": {"bucket": {"name": REPORTS_BUCKET}, "object": {"key": manifest.replace("=", "%3D")}}}
+        self.assertEqual(app.handler(event, None), {"recommendations": 2, "savings": 45.4, "findings": 1})
+        self.assertEqual(app.handler(event, None)["findings"], 0)
+        status, data = self.call("GET", "/api/recommendations")
+        self.assertEqual((status, data["count"], [item["id"] for item in data["items"]]), (200, 2, ["r1", "r2"]))
+        first = data["items"][0]
+        self.assertEqual((first["project"], first["restart"], first["recommended"], first["resource"]), ("build", True, "t4g.small", "i-0abc"))
+        self.assertEqual(self.findings()[0]["rule"], "savings")
+        self.assertIn("$45.00", mail.describe(self.findings()[0], mail.TEXT["en"]))
+
+
+class TrafficTest(Base):
+    CF = "cloudfront/wiki-serverless/2026/10/17/E123.2026-10-17-10.abcd.gz"
+    S3 = "s3/1/eu-central-1/state-bucket/2026/10/17/2026-10-17-10-05-00-ABCDEF"
+
+    def put(self, key, text):
+        import gzip
+        body = gzip.compress(text.encode("utf-8")) if key.startswith("cloudfront/") else text.encode("utf-8")
+        self.fakes["s3"].put(LOGS_BUCKET, key, body)
+        return app.handler({"source": "aws.s3", "detail": {"bucket": {"name": LOGS_BUCKET}, "object": {"key": key}}}, None)
+
+    def cf_line(self, path, status, country="DE", result="Hit", ip="198.51.100.1"):
+        return json.dumps({"date": "2026-10-17", "time": "10:01:02", "c-ip": ip, "c-country": country, "cs-method": "GET",
+                           "cs-uri-stem": path, "sc-status": str(status), "sc-bytes": "1000", "time-taken": "0.020",
+                           "cs(Referer)": "-", "cs(User-Agent)": "Mozilla/5.0%20(X11)", "x-edge-result-type": result,
+                           "x-host-header": "wiki.example.com"})
+
+    def test_cloudfront_and_s3(self):
+        lines = [self.cf_line("/", 200), self.cf_line("/app.js", 200), self.cf_line("/api/me", 403, result="Error", country="US"),
+                 self.cf_line("/wp-login.php", 404, result="Miss", ip="203.0.113.9")]
+        self.assertEqual(self.put(self.CF, "\n".join(lines))["requests"], 4)
+        s3_line = ('79a59df900b949e5 state-bucket [17/Oct/2026:10:05:00 +0000] 52.58.10.7 '
+                   'arn:aws:sts::1:assumed-role/Terraform/github-actions 3E57427F3EXAMPLE REST.GET.OBJECT '
+                   '916503251961-tozapid/wiki.tfstate "GET /916503251961-tozapid/wiki.tfstate HTTP/1.1" 200 - 2662992 3462992 70 10 '
+                   '"-" "APN/1.0 HashiCorp/1.0 Terraform/1.16.3" - abc SigV4 TLS_AES_128_GCM_SHA256 AuthHeader '
+                   'state-bucket.s3.eu-central-1.amazonaws.com TLSv1.3 - -')
+        denied = s3_line.replace(" 200 - 2662992", " 403 AccessDenied 243").replace("arn:aws:sts::1:assumed-role/Terraform/github-actions", "-")
+        self.assertEqual(self.put(self.S3, s3_line + "\n" + denied)["requests"], 2)
+        status, data = self.call("GET", "/api/traffic")
+        self.assertEqual(sorted(item["source"] for item in data["sources"]), ["cloudfront/wiki-serverless", "s3/state-bucket"])
+        status, day = self.call("GET", "/api/traffic/day", params={"source": "cloudfront/wiki-serverless", "day": "2026-10-17"})
+        counts = day["counts"]
+        self.assertEqual((counts["requests"], counts["s2xx"], counts["s4xx"], counts["hits"], counts["bytes"]), (4, 2, 2, 2, 4000))
+        self.assertEqual(counts["countries"], {"DE": 3, "US": 1})
+        self.assertEqual(counts["agents"], {"Mozilla/5.0 (X11)": 4})
+        status, day = self.call("GET", "/api/traffic/day", params={"source": "s3/state-bucket", "day": "2026-10-17"})
+        self.assertEqual(day["counts"]["requesters"], {"role/Terraform/github-actions": 1, "anonymous": 1})
+        self.assertEqual(day["counts"]["errors"], {"AccessDenied": 1})
+        # The daily job folds the files; the numbers stay, a file read again counts once.
+        self.assertEqual(traffic.compact("cloudfront/wiki-serverless", "2026-10-17"), 1)
+        self.put(self.CF, "\n".join(lines))
+        traffic.compact("cloudfront/wiki-serverless", "2026-10-17")
+        status, days = self.call("GET", "/api/traffic/days", params={"source": "cloudfront/wiki-serverless", "from": "2026-10-16", "to": "2026-10-17"})
+        self.assertEqual((days["days"]["2026-10-17"]["requests"], days["days"]["2026-10-16"]), (4, None))
+        self.assertEqual(self.call("GET", "/api/traffic/day", params={"source": "../x"})[1]["code"], "bad_source")
 
 
 if __name__ == "__main__":
