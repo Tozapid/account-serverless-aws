@@ -182,7 +182,7 @@ class CostsTest(Base):
         self.assertAlmostEqual(month["total"], 1.1)
         self.assertEqual(month["usage_days"], {"2026-10-01": 0.75, "2026-10-02": 0.25})
         self.assertEqual(month["kinds"], {"Usage": 1.0, "Tax": 0.1})
-        self.assertEqual(month["projects"], {"wiki": 0.25, "search": 0.5, "": 0.35})
+        self.assertEqual(month["projects"], {"wiki": 0.25, "search": 0.5, "(untagged)": 0.35})
         self.assertEqual(month["day_services"]["2026-10-01"], {"AmazonS3": 0.25, "AWSLambda": 0.5})
 
     def test_manifest_without_files(self):

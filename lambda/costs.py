@@ -40,6 +40,8 @@ import rules
 PERIOD_RE = re.compile(r"BILLING_PERIOD=(\d{4}-\d{2})")
 NOT_USAGE = {"Tax", "Credit", "Refund"}
 USAGE_LIMIT = 40
+# The project of a line without the tag: DynamoDB takes no empty key in a map.
+UNTAGGED = "(untagged)"
 SPIKE_DAYS = 14
 SPIKE_MIN_BASELINE = 7
 
@@ -128,7 +130,7 @@ def summarize(rows, period):
         add(days, day, cost)
         add(services, service, cost)
         add(regions, row.get("product_region_code") or "global", cost)
-        add(projects, tag_value(row.get("resource_tags"), tag), cost)
+        add(projects, tag_value(row.get("resource_tags"), tag) or UNTAGGED, cost)
         if kind not in NOT_USAGE:
             add(usage_days, day, cost)
             add(day_services.setdefault(day, {}), service, cost)

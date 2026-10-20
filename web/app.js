@@ -803,7 +803,7 @@
       section(t("costs.byDay"), costChart(month)),
       el("div", { class: "columns" }, [
         section(t("costs.services"), shareTable(month.services, unit, serviceName)),
-        section(t("costs.projects"), [shareTable(month.projects, unit, (key) => key || t("costs.untagged")), el("p", { class: "hint" }, t("costs.projectsHint"))]),
+        section(t("costs.projects"), [shareTable(month.projects, unit, (key) => (key && key !== "(untagged)" ? key : t("costs.untagged"))), el("p", { class: "hint" }, t("costs.projectsHint"))]),
         section(t("costs.regions"), shareTable(month.regions, unit, (key) => (key === "global" ? t("costs.global") : key))),
         section(t("costs.kinds"), shareTable(month.kinds, unit, (key) => t("kind." + key) === "kind." + key ? key : t("kind." + key))),
       ]),

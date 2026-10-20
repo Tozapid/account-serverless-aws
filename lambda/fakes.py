@@ -44,6 +44,8 @@ def stored(value):
     if isinstance(value, float):
         raise TypeError("Float types are not supported. Use Decimal types instead.")
     if isinstance(value, dict):
+        if "" in value:
+            raise ClientError("ValidationException")
         return {key: stored(item) for key, item in value.items()}
     if isinstance(value, list):
         return [stored(item) for item in value]
