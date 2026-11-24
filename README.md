@@ -20,7 +20,7 @@ Sign in with `demo@example.com` / `Demo-Password-1` (the fields are filled in fo
 
 The demo shows a **made-up account**, `123456789012`, and reads nothing of the AWS account it runs in: three months of costs of a small web shop (a website, an orders API, a build server, a little AI assistant new this month) with a spike two days ago and two budgets, and thirty days of CloudTrail — Terraform from GitHub Actions, two people signing in through IAM Identity Center, a CI user, a Lambda function and AWS services — with the incidents of [`seed/seed.json`](seed/seed.json): the root user signing in, CloudTrail stopped for a few minutes, a contractor's user made, a security group opened on port 22, failed sign-ins and a sign-in without MFA from a new address, an instance in an unexpected region, a bucket made public, a burst of denied calls, and two CloudTrail Insights; five recommendations of Cost Optimization Hub; and fourteen days of traffic of two sites and an S3 bucket. The costs, the counters, the events and the findings are made by the same code that reads a real account: the reset writes lines of a cost report and CloudTrail records, rows of the export of the recommendations and requests of the access logs, and hands them to it.
 
-Everything a visitor may do works: the filters, the charts, the events and their requests, the findings, acknowledging them, the rules in the settings, the language and the mails a user wants. The demo user is an administrator, so the users are there to look at; changing them is not, and "Refresh" and "Load from S3" are off, as there is no account to read. The account is made again at the first reset of every day (UTC), dated back from that day; every hour the reset adds the CloudTrail records and the requests of the hour, so the day goes on, puts back the rules, the mails and the acknowledged findings, and deletes any other user. Changing the password and two-factor authentication are hidden in the demo, so no visitor can lock the others out.
+Everything a visitor may do works: the filters, the charts, the events and their requests, the findings, acknowledging them, the rules in the settings, the language and the mails a user wants. The demo user is an administrator, so the users are there to look at; changing them is not, and "Refresh" and "Load from S3" are off, as there is no account to read. Six hours after the first change of a visitor the reset puts back the rules, the mails and the acknowledged findings, deletes any other user and adds the CloudTrail records and the requests up to that hour; the first reset of a new day (UTC) makes the account again, dated back from that day. A demo nobody changes is not reset, so its days stay where the last reset left them. Changing the password and two-factor authentication are hidden in the demo, so no visitor can lock the others out.
 
 ## Features
 
@@ -73,7 +73,7 @@ flowchart LR
 | Traffic | the access logs bucket (`logs_bucket`) |
 | Data of the page | DynamoDB on demand, one table |
 | Mails | SES from `sender_address` (production) |
-| Demo | Lambda `lambda/reset.py`, EventBridge `rate(1 hour)` |
+| Demo | Lambda `lambda/reset.py`, a one-off EventBridge Scheduler schedule that the first change makes |
 
 The page reads the table only, never S3 or the AWS APIs: everything it shows is what the reports, the logs and the daily job left there. That is what lets the demo fill the table with a made-up account.
 
@@ -101,7 +101,7 @@ The root of this repository is the module. It makes no providers: the caller pas
 
 ```hcl
 module "account" {
-  source = "git::https://github.com/Tozapid/account-serverless-aws.git?ref=v0.3.1"
+  source = "git::https://github.com/Tozapid/account-serverless-aws.git?ref=v0.4.0"
 
   providers = {
     aws        = aws
@@ -134,7 +134,7 @@ module "account" {
 | `totp_issuer` | `AWS account` | Name of the site in an authenticator app |
 | `sso_metadata_url`, `sso_domain_name`, `sso_admin_groups` | `""`, `""`, `[]` | Sign-in through AWS SSO (see below) |
 | `demo` | `false` | Public demo: the made-up account of `seed/seed.json` instead of this one, the sign-in published and filled in, no password change or two-factor authentication, read-only administration, no mails |
-| `reset_schedule` | `""` | The reset of the demo (`rate(1 hour)` there) |
+| `reset_delay_hours` | `0` | Hours after the first change that the demo is reset (`6` there); `0`: no reset |
 | `access_logs_bucket` | `""` | Bucket of the access logs of the page itself (see [Access logs](#access-logs)) |
 | `digest_schedule`, `cost_tag`, `spike_factor`, `spike_min_usd`, `allowed_regions`, `event_days`, `savings_min_usd`, `releases_repository` | see `variables.tf` | The digest, the rules and the releases Settings → Version compares with |
 

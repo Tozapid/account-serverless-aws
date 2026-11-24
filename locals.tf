@@ -19,7 +19,7 @@ locals {
   trail   = !var.demo && var.trail_bucket != ""
   budgets = !var.demo
   traffic = !var.demo && var.logs_bucket != ""
-  reset   = var.reset_schedule != ""
+  reset   = var.reset_delay_hours > 0
   # The alerts and the digest by mail (ses.tf), from sender_address on
   # domain_name. The demo sends nothing.
   mail = !var.demo && var.sender_address != ""

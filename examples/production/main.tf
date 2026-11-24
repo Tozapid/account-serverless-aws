@@ -27,7 +27,7 @@ provider "aws" {
 }
 
 module "account" {
-  source = "git::https://github.com/Tozapid/account-serverless-aws.git?ref=v0.3.1"
+  source = "git::https://github.com/Tozapid/account-serverless-aws.git?ref=v0.4.0"
 
   providers = {
     aws        = aws

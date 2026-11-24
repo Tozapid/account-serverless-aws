@@ -317,7 +317,7 @@
       el("h1", {}, t("brand")),
       demo.email ? el("p", { class: "demo-note" }, [
         t("demo.signIn", { email: demo.email, password: demo.password }),
-        demo.reset ? " " + t("demo.reset") : "",
+        demo.reset ? " " + t("demo.reset", { hours: demo.reset }) : "",
       ]) : null,
       config.ssoProvider ? el("button", { type: "button", class: "primary", onclick: startSso }, t("login.sso")) : null,
       config.ssoProvider ? el("p", { class: "login-or" }, t("login.or")) : null,
