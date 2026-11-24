@@ -22,7 +22,7 @@ resource "aws_ssm_parameter" "admin_password" {
 # The reset makes the examples with the code that reads a real account.
 data "archive_file" "reset" {
   type             = "zip"
-  output_path      = "${path.module}/.build/reset.zip"
+  output_path      = "${path.root}/.build/${local.name}-reset.zip"
   output_file_mode = "0644"
 
   dynamic "source" {

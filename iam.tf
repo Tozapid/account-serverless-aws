@@ -126,7 +126,7 @@ data "aws_iam_policy_document" "lambda" {
     content {
       sid       = "SendMail"
       actions   = ["ses:SendEmail"]
-      resources = ["arn:aws:ses:${var.region}:${local.account_id}:identity/*"]
+      resources = ["arn:aws:ses:${local.region}:${local.account_id}:identity/*"]
 
       condition {
         test     = "StringEquals"

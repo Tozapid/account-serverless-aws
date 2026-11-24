@@ -95,46 +95,63 @@ CloudTrail Insights writes under `CloudTrail-Insight/` of the trail's bucket; th
 
 The function reads only what arrives after it is deployed. Settings → Load from S3 (administrators) asks for days up to yesterday, how many days to keep them, and the CloudTrail logs, the cost reports of their months or both. The job runs in invocations of the function of its own, a day of the logs or a month of the report at a time, hands the rest on to the next while it runs out of time, and shows how far it got; one runs at a time, and it can be stopped. A day is read whole — the files of every region of the day and of the first hour of the next — and replaces the counters, combinations and events of that day; no rule runs on it. The events expire after the days asked, but not before `event_days` after their time, and what the table keeps for good stays so.
 
-## Test environment and production
+## Use the module
 
-The defaults deploy the **test environment**, the public demo above:
+The root of this repository is the module. It makes no providers: the caller passes `aws` (the region of everything but CloudFront) and `aws.global` (`us-east-1`, CloudFront and its certificate). Every release of [`CHANGELOG.md`](CHANGELOG.md) is a tag `vX.Y.Z`; a site takes a newer version by a newer `ref`, and Settings → Version shows the version of the module and the releases after it.
 
-- no domain: the page answers at its `*.cloudfront.net` address with CloudFront's certificate, and no DNS is touched;
-- nothing of the account is read: no report, no log, no budget, and no permission for them;
-- no SES identity and no mails;
-- the sign-in is published and filled in (`demo = true`), password change and two-factor authentication are hidden, and the administration of the users is read-only;
-- the reset (`reset_schedule`) makes the account of `seed/seed.json`;
-- point-in-time recovery is off, and the page bucket is deleted with its content on `terraform destroy`.
+```hcl
+module "account" {
+  source = "git::https://github.com/Tozapid/account-serverless-aws.git?ref=v0.3.0"
 
-**Production** reads your account. Start from [`examples/production.tfvars`](examples/production.tfvars):
+  providers = {
+    aws        = aws
+    aws.global = aws.global
+  }
 
-| Variable | Test environment (default) | Production |
+  name              = "account"
+  domain_name       = "aws.example.com"
+  route53_zone_name = "example.com"
+  admin_email       = "you@example.com"
+  reports_bucket    = "cost-reports-123456789012"
+  trail_bucket      = "aws-cloudtrail-logs-123456789012"
+  sender_address    = "alert@aws.example.com"
+}
+```
+
+[`examples/production/main.tf`](examples/production/main.tf) is that with its providers and backend. The inputs:
+
+| Variable | Default | What it is |
 | --- | --- | --- |
-| `name` | `account-serverless` | `account` — the prefix of every resource |
-| `demo` | `true` | `false` |
-| `domain_name`, `route53_zone_name` | `""` — the CloudFront address | `aws.example.com`, `example.com` |
-| `reports_bucket`, `cur_prefix` | `""` — no costs | the bucket and `<S3 prefix>/<export name>` of the Data Export |
-| `coh_prefix` | `coh/cost-optimization` — read only with `reports_bucket` | `<S3 prefix>/<export name>` of the Data Export of the recommendations, or `""` |
-| `trail_bucket` | `""` — no CloudTrail | the bucket of the trail |
-| `logs_bucket` | `""` — no traffic | the bucket of the access logs |
-| `access_logs_bucket` | `""` — no access logs of the page | the same bucket, to see the page's own traffic |
-| `sender_address` | `""` — no SES, no mails | `alert@aws.example.com` |
-| `admin_email` | `demo@example.com` | your address |
-| `admin_password` | `Demo-Password-1` | `""` — Cognito mails a temporary password |
-| `reset_schedule` | `rate(1 hour)` | `""` — no reset, no examples |
+| `name` | — | Prefix of every resource name; the page bucket adds the account id |
+| `admin_email` | — | The first user, an administrator |
+| `admin_password` | `""` | Its permanent password; empty: Cognito mails a temporary one |
+| `domain_name`, `route53_zone_name` | `""` | The page's name and its public Route 53 zone; empty: the `*.cloudfront.net` address |
+| `reports_bucket`, `cur_prefix`, `coh_prefix` | `""`, `cur/cost-and-usage`, `coh/cost-optimization` | The bucket and prefixes of the Data Exports of costs and recommendations; empty bucket: no costs |
+| `trail_bucket`, `trail_kms_key_arn` | `""` | The bucket of the trail and its KMS key; empty: no CloudTrail |
+| `logs_bucket` | `""` | The bucket of the access logs of the account; empty: no traffic |
+| `sender_address` | `""` | From address of the alerts and the digest, on `domain_name`; empty: no mails |
+| `ses_identity` | `true` | The module makes `domain_name` the SES identity (`ses.tf`); `false` when the caller manages it |
+| `totp_issuer` | `AWS account` | Name of the site in an authenticator app |
+| `sso_metadata_url`, `sso_domain_name`, `sso_admin_groups` | `""`, `""`, `[]` | Sign-in through AWS SSO (see below) |
+| `demo` | `false` | Public demo: the made-up account of `seed/seed.json` instead of this one, the sign-in published and filled in, no password change or two-factor authentication, read-only administration, no mails |
+| `reset_schedule` | `""` | The reset of the demo (`rate(1 hour)` there) |
+| `access_logs_bucket` | `""` | Bucket of the access logs of the page itself (see [Access logs](#access-logs)) |
+| `digest_schedule`, `cost_tag`, `spike_factor`, `spike_min_usd`, `allowed_regions`, `event_days`, `savings_min_usd`, `releases_repository` | see `variables.tf` | The digest, the rules and the releases Settings → Version compares with |
 
-What the account needs, made outside this stack (they belong to the account, not to the page):
+The zips of the functions are built at plan time in `.build/` of the root module, not of the module: a CI that carries what a plan makes to its apply leaves `.terraform/`, where a module fetched from git lives, behind.
 
-1. **A Data Export** of the type "Standard data export", table `COST_AND_USAGE_REPORT` (CUR 2.0), daily, CSV gzipped, overwriting, to an S3 bucket in the region of the stack; `cur_prefix` is its S3 prefix and its name. The bucket policy has to let `bcm-data-exports.amazonaws.com` and `billingreports.amazonaws.com` write. A cost allocation tag (`cost_tag`, `Project`) splits the costs by project once it is activated in Billing.
-2. **A trail** of the management events of all regions to an S3 bucket in the region of the stack, without a key prefix (the load reads `AWSLogs/<account>/CloudTrail/…`); `trail_kms_key_arn` if it is encrypted with KMS.
+What the account needs, made outside the module (they belong to the account, not to the page):
+
+1. **A Data Export** of the type "Standard data export", table `COST_AND_USAGE_REPORT` (CUR 2.0), daily, CSV gzipped, overwriting, to an S3 bucket in the region of the module; `cur_prefix` is its S3 prefix and its name. The bucket policy has to let `bcm-data-exports.amazonaws.com` and `billingreports.amazonaws.com` write. A cost allocation tag (`cost_tag`, `Project`) splits the costs by project once it is activated in Billing.
+2. **A trail** of the management events of all regions to an S3 bucket in the region of the module, without a key prefix (the load reads `AWSLogs/<account>/CloudTrail/…`); `trail_kms_key_arn` if it is encrypted with KMS.
 3. Optional: **Cost Optimization Hub** with Compute Optimizer enrolled, and a Data Export of the table `COST_OPTIMIZATION_RECOMMENDATIONS` to the same bucket (it needs the service-linked role `AWSServiceRoleForBCMDataExports`; the first export may fail for up to a day after the enrollment). **Insights** on the trail (`ApiCallRateInsight`, `ApiErrorRateInsight`), charged per event analysed. A bucket of **access logs** for `logs_bucket`, whose policy lets `delivery.logs.amazonaws.com` write under `cloudfront/` and `logging.s3.amazonaws.com` under `s3/`; each site turns on its CloudFront standard logs (v2) into it, and each bucket read without CloudFront its server access logs.
 4. **EventBridge notifications** on the buckets (`aws_s3_bucket_notification` with `eventbridge = true`, or Properties → Amazon EventBridge in the console): the new manifests and log files reach the function through them.
 
 Steps to production:
 
 1. Pick a fresh `name` (and state key): production is a separate deployment, not a change of the demo.
-2. The domain needs a public Route 53 zone in the same account (`route53_zone_name`): the stack validates the certificate there and writes the alias records.
-3. With `sender_address` the stack makes `domain_name` an SES identity (`ses.tf`): Easy DKIM, a MAIL FROM domain `mail.<domain_name>` and DMARC, in the same zone. While the SES account of the region is in the sandbox, mails reach only verified addresses.
+2. The domain needs a public Route 53 zone in the same account (`route53_zone_name`): the module validates the certificate there and writes the alias records.
+3. With `sender_address` the module makes `domain_name` an SES identity (`ses.tf`, unless `ses_identity = false`): Easy DKIM, a MAIL FROM domain `mail.<domain_name>` and DMARC, in the same zone. While the SES account of the region is in the sandbox, mails reach only verified addresses.
 4. Sign in with the temporary password Cognito mails to `admin_email`. Invite the others in Settings → Users.
 5. To fill in what came before, use Settings → Load from S3.
 
@@ -147,6 +164,10 @@ Optional, with a domain. IAM Identity Center makes SAML applications in the cons
 3. Attribute mappings: `Subject` → `${user:email}` (format `emailAddress`), and `email` → `${user:email}` (format `unspecified`).
 4. The URL of "IAM Identity Center SAML metadata file" goes into `sso_metadata_url`, the sign-in domain (such as `auth.aws.example.com`, in the same zone) into `sso_domain_name`, the groups whose members are administrators into `sso_admin_groups`. Assign the application to the groups who may sign in, and apply.
 
+### The demo
+
+[`demo/`](demo) is the root module of the public demo: the module from `../` with `demo = true`, the published sign-in, the reset and no domain, so it answers at its CloudFront address and touches no DNS; nothing of the account is read (no report, no log, no budget, and no permission for them), there is no SES identity and no mail; point-in-time recovery is off, and the page bucket goes with its content on `terraform destroy`.
+
 ## Deploy
 
 ### What you need
@@ -157,29 +178,29 @@ Optional, with a domain. IAM Identity Center makes SAML applications in the cons
 
 ### GitHub Actions
 
-[`.github/workflows/terraform.yml`](.github/workflows/terraform.yml) only calls the shared workflow of [Tozapid/demo-ci-cd-skeleton](https://github.com/Tozapid/demo-ci-cd-skeleton):
+[`.github/workflows/terraform.yml`](.github/workflows/terraform.yml) only calls the shared workflow of [Tozapid/demo-ci-cd-skeleton](https://github.com/Tozapid/demo-ci-cd-skeleton), with `working_directory: demo`:
 
-- every push and pull request: `terraform fmt` and `terraform validate`; the Lambda tests; the page's syntax check;
+- every push and pull request: `terraform fmt` and `terraform validate` of `demo/`, and with it of the module; the Lambda tests; the page's syntax check;
 - pull requests from this repository: `terraform plan` in the environment `demo`;
 - a preview of a pull request, by hand: Run workflow with `preview` = its number deploys its last push once more as `account-serverless-pr<number>`, with its own state, and comments the address on it; it is destroyed when the pull request is merged or closed, by hand (`destroy`), or by the daily sweep, which also takes those not deployed for a week;
 - a push to `main` or a manual run: plan and apply in the environment `demo`. The job stops if the plan would destroy or replace a bucket, the table or the user pool;
-- after `main` is deployed: the GitHub release of the newest `CHANGELOG.md` entry, once.
+- after `main` is deployed: the tag and the GitHub release of the newest `CHANGELOG.md` entry, once. Every version is a tag the sites pin the module to.
 
 The jobs get AWS credentials from GitHub's OIDC token: no AWS key is stored anywhere.
 
 ### Versions and releases
 
-Every entry of [`CHANGELOG.md`](CHANGELOG.md) starts with its version, optionally followed by a date or a title (`## v0.2.0`, `## v0.2.0 — 2026-11-01`), with the changes under `### Added`, `### Changed`, `### Fixed` and `### Security`, newest first. The site takes its version from the newest entry when Terraform deploys it, and the release job makes it a tag and a GitHub release. Settings → Version reads the releases of `releases_repository` from the Atom feed of the GitHub releases and keeps them an hour.
+Every entry of [`CHANGELOG.md`](CHANGELOG.md) starts with its version, optionally followed by a date or a title (`## v0.2.0`, `## v0.2.0 — 2026-11-01`), with the changes under `### Added`, `### Changed`, `### Fixed` and `### Security`, newest first. A site takes its version from the newest entry of the module it runs, and the release job makes it a tag and a GitHub release. A change that a site has to take over is a new entry, and so a new tag. Settings → Version reads the releases of `releases_repository` and shows those after the version of the site.
 
 ### From a workstation
 
 ```bash
+cd demo
 terraform init \
   -backend-config="bucket=<state bucket>" \
   -backend-config="key=account-serverless-aws/terraform.tfstate" \
   -backend-config="region=eu-central-1"
-terraform apply                                   # the test environment
-terraform apply -var-file=terraform.tfvars        # production, see above
+terraform apply
 ```
 
 ## API
@@ -258,7 +279,9 @@ The tests use no network: DynamoDB, S3, SES, Cognito, Budgets, Lambda, Identity 
 | `cloudfront.tf`, `dns.tf`, `frontend.tf`, `web/` | The distribution, the domain, the page, its charts (`charts.js`) and translations (`i18n.js`) |
 | `ses.tf` | The SES identity of `domain_name` (production with `sender_address`) |
 | `reset.tf`, `lambda/reset.py`, `seed/seed.json` | The made-up account of the demo |
-| `examples/production.tfvars` | A starting point for production |
+| `main.tf`, `terraform.tf`, `variables.tf`, `outputs.tf` | The module: its providers (`aws`, `aws.global`), inputs and outputs |
+| `demo/` | The public demo, a call of the module, and the moves of its state |
+| `examples/production/` | A starting point for production |
 
 ## Limitations
 

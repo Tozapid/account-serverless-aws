@@ -1,11 +1,12 @@
 locals {
   name       = var.name
   account_id = data.aws_caller_identity.current.account_id
+  region     = data.aws_region.current.region
   web_bucket = "${local.name}-web-${local.account_id}"
   # Known before the function exists, so that its policy may let it invoke
   # itself: "Refresh" and a load of a period hand their work to an
   # invocation of its own.
-  function_arn = "arn:aws:lambda:${var.region}:${local.account_id}:function:${local.name}"
+  function_arn = "arn:aws:lambda:${local.region}:${local.account_id}:function:${local.name}"
 
   # The page on its own domain, or on the CloudFront address without one.
   custom_domain = var.domain_name != ""
@@ -22,6 +23,8 @@ locals {
   # The alerts and the digest by mail (ses.tf), from sender_address on
   # domain_name. The demo sends nothing.
   mail = !var.demo && var.sender_address != ""
+  # The SES identity of domain_name, unless the caller manages it.
+  ses_identity = local.mail && var.ses_identity
   # The account the page names: a made-up one in the demo.
   shown_account = var.demo ? "123456789012" : local.account_id
 
@@ -40,7 +43,7 @@ locals {
     "style-src 'self'",
     "img-src 'self' data:",
     # The token endpoint of the sign-in domain, for AWS SSO.
-    "connect-src 'self' https://cognito-idp.${var.region}.amazonaws.com${local.sso ? " https://${var.sso_domain_name}" : ""}",
+    "connect-src 'self' https://cognito-idp.${local.region}.amazonaws.com${local.sso ? " https://${var.sso_domain_name}" : ""}",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
