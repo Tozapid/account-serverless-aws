@@ -16,7 +16,7 @@ data "archive_file" "app" {
       filename = source.value
     }
   }
-  output_path      = "${path.module}/.build/account.zip"
+  output_path      = "${path.root}/.build/${local.name}-account.zip"
   output_file_mode = "0644"
 }
 
@@ -74,6 +74,13 @@ resource "aws_lambda_function" "app" {
   logging_config {
     log_format = "Text"
     log_group  = aws_cloudwatch_log_group.lambda.name
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !local.mail || (local.custom_domain && endswith(var.sender_address, "@${var.domain_name}"))
+      error_message = "sender_address needs domain_name and has to be on it: the domain is the SES identity the mails come from."
+    }
   }
 
   depends_on = [aws_iam_role_policy.lambda]

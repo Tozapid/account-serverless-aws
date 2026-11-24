@@ -40,7 +40,7 @@
     severity: "",
     openOnly: false,
   };
-  const ISSUER = "AWS account demo";
+  const ISSUER = config.issuer || "AWS account";
   // The open source project of this page, linked from the sign-in page.
   const REPOSITORY = "https://github.com/Tozapid/account-serverless-aws";
   // The language is the Cognito attribute "locale" of the user; the browser

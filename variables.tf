@@ -1,18 +1,11 @@
-variable "region" {
-  type        = string
-  default     = "eu-central-1"
-  description = "Region of every resource but CloudFront: the API, the data, the sign-in and the reading of the reports."
-}
-
 variable "name" {
   type        = string
-  default     = "account-serverless"
-  description = "Prefix of every resource name; the page bucket adds the account id. The deploy role of the demo is limited to it."
+  description = "Prefix of every resource name; the page bucket adds the account id."
 }
 
 variable "demo" {
   type        = bool
-  default     = true
+  default     = false
   description = "Public demo: the page shows made-up examples instead of the account (no report, log or budget of the account is read), the sign-in screen shows and fills in the demo sign-in, the settings hide the password and two-factor authentication, and administrators may look at the users but not change them."
 }
 
@@ -30,20 +23,19 @@ variable "route53_zone_name" {
 
 variable "admin_email" {
   type        = string
-  default     = "demo@example.com"
   description = "Sign-in of the first user, an administrator. Self sign-up is off; administrators invite the others on the page."
 }
 
 variable "admin_password" {
   type        = string
-  default     = "Demo-Password-1"
+  default     = ""
   sensitive   = true
   description = "Permanent password of the first user, published in the demo and put back by the reset. Empty: Cognito mails admin_email a temporary password instead."
 }
 
 variable "reset_schedule" {
   type        = string
-  default     = "rate(1 hour)"
+  default     = ""
   description = "When the demo goes back to its initial state: the table is wiped, the examples of seed/seed.json made again, the first user gets admin_password back and other users go. An empty string turns the reset off."
 }
 
@@ -56,6 +48,18 @@ variable "sender_address" {
     condition     = var.sender_address == "" || can(regex("^[^@\\s]+@[^@\\s]+$", var.sender_address))
     error_message = "sender_address is an email address or empty."
   }
+}
+
+variable "ses_identity" {
+  type        = bool
+  default     = true
+  description = "Makes domain_name an SES identity for the mails of sender_address (ses.tf). False when the caller manages the SES identity of the domain itself."
+}
+
+variable "totp_issuer" {
+  type        = string
+  default     = "AWS account"
+  description = "Name of the site in an authenticator app, next to the email of the user."
 }
 
 variable "digest_schedule" {
@@ -164,13 +168,4 @@ variable "releases_repository" {
   type        = string
   default     = "Tozapid/account-serverless-aws"
   description = "GitHub repository (owner/name) whose releases the settings compare the version of the site with. Empty turns the check off."
-}
-
-variable "tags" {
-  type = map(string)
-  default = {
-    Managed = "IAC"
-    Project = "account-serverless-aws"
-  }
-  description = "Tags applied to supported resources."
 }
