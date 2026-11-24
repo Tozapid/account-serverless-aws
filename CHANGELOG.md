@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.0
+
+### Changed
+
+- The demo is reset six hours after the first change instead of every hour, and not at all while nobody changes anything: most hours of a demo cost nothing now. The first change through the API (any request but a read that succeeds) makes a one-off schedule `<name>-reset` of EventBridge Scheduler, which calls the reset function `reset_delay_hours` later with the role `<name>-reset-scheduler` and then deletes itself; while it waits, further changes make none. The EventBridge rule of the hourly reset is gone. `reset_schedule` became `reset_delay_hours`, a number of hours (`0`, the default, no reset; `6` in the demo).
+- The sign-in page of the demo says when it goes back to the start: six hours after a change.
+- Without changes the made-up account is not reset either, so it does not take on the records of a new hour or a new day until a visitor changes something; the reset after a change brings it up to that hour, or makes it again on a new day.
+
 ## v0.3.1
 
 ### Removed
